@@ -1,96 +1,81 @@
-# INSTALL.md — instalace pluginu iVysílání
+# Instalace
 
-Tento dokument je pro **Iris** (má přístup k produkčnímu Jellyfin serveru/NASu).
-Agent, který plugin stavěl, server **neměnil ani nerestartoval** — pouze
-připravil soubory v `artifacts/`.
+## Co je potřeba
 
-## Co nakopírovat
+- běžící Jellyfin12.1 (kontejner `jellyfin/jellyfin`)
+- dva soubory z [release](../../releases): `Jellyfin.Plugin.Ivysilani.dll`
+  a `meta.json`
 
-Z `artifacts/` v tomto repozitáři:
+## Kam s nimi
 
-- `Jellyfin.Plugin.Ivysilani.dll` (verze 1.1.0.0, 76 288 B, sha256
-  `bf935e96f24a0afbcd26d66b063859329e5475d39291f826f90ef45bc06b0e9f`)
-- `meta.json`
-
-## Kam
-
-Jellyfin na cílovém serveru čte pluginy z `/config/plugins/<libovolný název
-složky>/`, což je na NASu bindnuté na `/volume1/jellyfin/`. Název složky je
-Jellyfinu lhostejný (každou podsložku prohledá a manifest si přečte z
-`meta.json`) — doporučuji ale bezdiakritický název, ať se nic nepoplete na
-souborovém systému NASu:
+Jellyfin čte pluginy ze složky `<config>/plugins/`. Pod Dockerem je to
+nejčastěji něco jako `/config/plugins/`, na NASu s bindem `/volume1/jellyfin/`
+to pak vychází na:
 
 ```
 /volume1/jellyfin/iVysilani/Jellyfin.Plugin.Ivysilani.dll
 /volume1/jellyfin/iVysilani/meta.json
 ```
 
-Tedy:
-
-1. Vytvoř na NASu složku `/volume1/jellyfin/iVysilani/`.
-2. Zkopíruj do ní oba soubory výše (zachovej přesně tato jména souborů).
-3. Nic dalšího se nerozbaluje/instaluje — žádné další DLL nejsou potřeba,
-   plugin nemá žádné externí závislosti mimo to, co už Jellyfin server sám
-   obsahuje (`Jellyfin.Controller`/`Jellyfin.Model` 12.1.0 jsou referencované
-   jen "compile-time", runtime verze dodává server).
+Název složky je jedno — Jellyfin projde každou podsložku a manifest si přečte
+z `meta.json`. Jen se vyvaruj diakritice v názvu, na souborových systémech
+NASu to někdy dělá neplechu. Jinak se nic nerozbaluje ani neinstaluje, plugin
+nemá žádné externí závislosti kromě toho, co už Jellyfin obsahuje.
 
 ## Restart
 
-Jellyfin načítá pluginy při startu procesu, takže je potřeba **restartovat
-celý jellyfin/jellyfin kontejner** (ne jen reload konfigurace):
+Pluginy se čtou při startu procesu, takže je potřeba **restartovat celý
+kontejner** (ne jen reload konfigurace):
+
+```bash
+docker restart jellyfin
+```
+
+nebo „Restart" přes Synology Container Manager / Portainer. Trvá to pár
+sekund. Žádné migrace ani jiné zásahy do dat neprobíhají.
+
+## Ověření
+
+1. **Dashboard → Plugins** — měl by tam být **iVysílání**, stav *Active*,
+   verze odpovídající staženému release. Pokud je *Malfunctioned* nebo
+   *NotSupported*, server hlásí jinou verzi API než12.1 — viz řešení níže.
+2. V menu se objeví **Channels** → iVysílání. (U některých verzí webu je
+   položka Channels schovaná; dá se zapnout v nastavení uživatele.)
+3. Otevři iVysílání — mělo by se ukázat14 kategorií + složka Oblíbené.
+   Rozklikni kategorii → seznam pořadů, pořad → jeho sezóny a díly.
+4. Přehrávání: díl by se měl spustit rovnou, bez transkódování (pokud to
+   klient a síť zvládnou).
+
+## Nastavení — Oblíbené
+
+Dashboard → **Plugins → iVysílání** (ozubené kolečko) → textové pole na
+seznam URL, jeden odkaz na řádek:
 
 ```
-docker restart <jméno-kontejneru-jellyfin>
+https://www.ceskatelevize.cz/porady/16208367858-na-telo/224512120130001
 ```
 
-nebo ekvivalentně přes Synology Container Manager / Portainer GUI — "Restart"
-na daném kontejneru. Žádný jiný zásah (DB migrace, apod.) není potřeba.
+Uložit a pořad se objeví ve složce Oblíbené.
 
-## Ověření po restartu
+## Aktualizace a odebrání
 
-1. **Dashboard → Plugins** → měl by se objevit **iVysílání**, stav *Active*,
-   verze 1.1.0.0. Pokud se objeví jako *Malfunctioned*/*NotSupported*,
-   zkontroluj v Jellyfin logu (`/config/log/*.log`) chybovou hlášku — s
-   `targetAbi: 12.1.0.0` by to na serveru hlásícím `Version 12.1.0` mělo sedět
-   přesně.
-2. V levém menu Jellyfinu by se měla objevit sekce **Channels** (u některých
-   verzí webového klienta je skrytá v Dashboardu pod "Channels" nebo se musí
-   v nastavení uživatele zapnout zobrazení "Channels" v domovské obrazovce —
-   **toto jsem nemohl ověřit naživo, protože nemám přístup k běžícímu
-   serveru**, zkontroluj to prosím po restartu a dej mi vědět, pokud se
-   nezobrazí).
-3. Otevři channel "iVysílání" — kořen by měl nabídnout **14 kategorií**
-   (Seriály, Filmy, Dokumenty, ...) + složku **"Oblíbené"** (prázdná, dokud
-   do konfigurace nevložíš vlastní URL). Rozklikni libovolnou kategorii →
-   měl by se zobrazit stránkovaný seznam pořadů dané kategorie (u velkých
-   kategorií, např. Dokumenty, je to přes 2600 pořadů — pokud klient
-   nenačítá další stránky automaticky, je to známé omezení, viz REPORT.md
-   sekce "Omezení v1.1.0"). Rozklikni pořad → měly by se zobrazit jeho díly.
-4. (Volitelně) **Dashboard → Plugins → iVysílání** (ikona ozubeného
-   kolečka) → konfigurační stránka s textarea pro seznam URL do složky
-   "Oblíbené". Vlož tam např.:
-   ```
-   https://www.ceskatelevize.cz/porady/16208367858-na-telo/224512120130001
-   ```
-   a klikni **Uložit** — pořad by se pak objevil ve složce "Oblíbené".
-5. Přehrání dílu (z kategorie i z Oblíbených) by mělo jít přímo (HLS direct
-   play) bez nutnosti transkódování.
+- **Aktualizace**: přepiš DLL (a `meta.json`) ve stejné složce a restartuj
+  kontejner. Nastavení (URL Oblíbených) leží jinde
+  (`<config>/data/plugins/configurations/`) a přepisem DLL se neztratí.
+- **Odebrání**: smaž složku pluginu a restartuj kontejner.
 
-## Odebrání / aktualizace
+## Když se plugin nenačte
 
-- **Odebrání**: smaž `/volume1/jellyfin/iVysilani/` a restartuj kontejner.
-- **Aktualizace** (nová verze DLL): přepiš `Jellyfin.Plugin.Ivysilani.dll` (a
-  `meta.json`, pokud se verze/popis změnily) ve stejné složce a restartuj
-  kontejner. Konfigurace (seznam URL) je uložena samostatně Jellyfinem
-  (`/config/data/plugins/configurations/`) a při aktualizaci DLL se neztratí.
+- Zkontroluj verzi serveru: `/System/Info/Public` musí hlásit `12.1.0`.
+  Jiná verze = nutné přebuildovat proti odpovídajícím balíčkům
+  `Jellyfin.Controller`/`Jellyfin.Model` (jiný `targetAbi`, možná i jiný
+  .NET).
+- Zkontroluj, že soubory ve složce pluginu jsou čitelné pro uživatele, pod
+  kterým kontejner běží.
+- Logy: `<config>/log/jellyfin*.log`, hledej `iVysílání` nebo
+  `Ivysilani`. Chyby pluginu jsou tam se jménem pluginu.
 
-## Co dělat, když se plugin nenačte
+## Chyby a nápady
 
-- Zkontroluj, že server skutečně běží na `12.1.0` (`/System/Info/Public`) —
-  pro jinou verzi by bylo nutné přebuildovat proti odpovídajícím
-  `Jellyfin.Controller`/`Jellyfin.Model` NuGet balíčkům (jiný `targetAbi` i
-  případně jiný `net` TFM, viz REPORT.md).
-- Zkontroluj oprávnění souborů v `/volume1/jellyfin/iVysilani/` (čitelné pro
-  uživatele, pod kterým běží kontejner).
-- Logy: `/config/log/jellyfinxxxx.log` v kontejneru, hledej `iVysílání` nebo
-  `Ivysilani`.
+Piš do [GitHub Issues](../../issues) — ideálně s verzí serveru, verzí
+pluginu a výřezem logu.

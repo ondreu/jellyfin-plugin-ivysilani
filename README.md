@@ -1,75 +1,110 @@
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/B7K822EW68)
 
-# Jellyfin.Plugin.Ivysilani
+# iVysílání pro Jellyfin
 
-Channel plugin pro Jellyfin, který do knihovny přidá **vybrané pořady z České
-televize (iVysílání)** a přehrává je **přímo ze serverů ČT** — žádné stahování,
-žádné DRM, žádné přihlašování.
+Channel plugin, který do Jellyfinu přidá katalog **iVysílání České televize** —
+seriály, filmy, dokumenty, dětské pořady, zpravodajství. Procházíš ho přímo
+v Jellyfinu a přehrává se **ze serverů ČT**, bez jakéhokoli stahování.
 
-> Neoficiální projekt, nespojený s Českou televizí. Plugin jen používá veřejné
-> endpointy přehrávače iVysílání a **pouze streamuje** (nic neukládá na disk).
+> Neoficiální projekt, nijak nespojený s Českou televizí ani s Jellyfin
+> Projectem. Plugin používá veřejné endpointy přehrávače iVysílání. Když je ČT
+> změní, může přestat fungovat — stejně jako kdysi změnila API, kvůli kterému
+> přestal fungovat yt-dlp.
 
 ## Co umí
 
-- **Seznam tvých pořadů** — v nastavení pluginu vložíš URL na pořady (jeden na
-  řádek). Žádný celý katalog, jen to, co chceš.
-- **Složka → epizody** — každý pořad se v channelu objeví jako složka
-  s epizodami (název, popis, obrázek z ČT, délka, datum vysílání).
-- **Přehrávání přímo z ČT** — resolve na podepsanou HLS URL (až **1080p**) až
-  těsně před přehráním; direct play i transkód jsou ověřené.
-- **Titulky** — externí `.vtt` stopa, pokud ji ČT nabízí.
-- **Mizí, když zmizí z iVysílání** — epizoda se přestane zobrazovat, jakmile ČT
-  přestane označovat díl jako přehratelný (cache 1–24 h, default 3 h).
-- **Žádné stažené médium** — na disku končí jen metadata (JSON/HTML).
+- **Celý katalog iVysílání** — kořen channelu nabídne14 kategorií (Seriály,
+  Filmy, Dokumenty, Pro děti, Sport, …) a k tomu složku **Oblíbené**.
+- **Oblíbené podle tebe** — v nastavení pluginu necháš seznam URL na pořady
+  (jeden na řádek) a ty se objeví ve složce Oblíbené. Hodí se pro pořady,
+  které chceš mít po ruce, aniž bys procházel celý katalog.
+- **Přehrávání přímo z ČT** — HLS stream až1080p se vyřeší až v okamžiku
+  přehrání, takže vždy dostaneš čerstvou, platnou adresu. Přehrává se rovnou,
+  Jellyfin zbytečně nekóduje.
+- **Obsah mizí s iVysíláním** — jakmile ČT díl přestane nabízet k přehrání,
+  přestane se v knihovně zobrazovat (čte se z krátkodobé cache, výchozí3 hodiny).
+- Na disku leží jen metadata. Žádná videa se nestahují a neukládají.
+
+## Jak je channel uspořádaný
+
+```
+iVysílání
+├── Seriály / Filmy / Dokumenty / …      (14 kategorií)
+├── Oblíbené                             (tvoje URL z nastavení)
+└── uvnitř pořadu:
+    Prasátko Peppa
+    ├── Season 2
+    │   ├── Bruslení
+    │   └── …
+    └── Season 3
+```
+
+Ta vrstva sezón tam není pro parádu. Jellyfin si při přehrávání dílu dohledá
+kompletní seznam dílů seriálu přes endpoint `/Shows/{id}/Episodes` a ten
+umí projít **jen přes sezónní složky** — bez nich vrací prázdný seznam, klient
+z toho usoudí, že nemá co přehrát, a ukončí přehrávání dřív, než vůbec požádá
+o zdroj (hláška „Nelze najít platný zdroj médií k přehrání"). Sezónní složky
+navíc v Jellyfinu vypadají správně — epizody mají číslo sezóny i dílu,
+detail stránky ukazuje „More from Season2".
+
+Díly se v sezónní složce materializují až ve chvíli, kdy ji otevřeš — to je
+běžné chování channel pluginů. Prostě procházej složkami normálně, na nic
+se nemusíš ptát.
 
 ## Instalace
 
-1. Stáhni `Jellyfin.Plugin.Ivysilani.dll` + `meta.json` z
-   [posledního release](../../releases) (nebo si postav zdrojáky).
-2. Vlož do `<config>/plugins/iVysilani/` (u Dockeru třeba
-   `/volume1/jellyfin/iVysilani/`).
-3. **Restartuj Jellyfin server.**
-4. Dashboard → **Plugins → iVysílání** → vlož URL pořadů → **Uložit**.
-5. V menu se objeví sekce **Channels** → iVysílání.
+1. Stáhni `Jellyfin.Plugin.Ivysilani.dll` a `meta.json` z
+   [posledního release](../../releases).
+2. Vlož je do složky pluginů — u běžného Dockeru třeba
+   `/volume1/jellyfin/iVysilani/`. Jméno složky je libovolné, důležité jsou
+   jména obou souborů.
+3. Restartuj Jellyfin (pluginy se čtou při startu).
+4. Dashboard → **Plugins → iVysílání** → nastav URL Oblíbených → Uložit.
+5. V menu se objeví **Channels** → iVysílání.
 
-Detaily (ověření, aktualizace, odebrání, co dělat když se plugin nenačte):
-viz [`INSTALL.md`](INSTALL.md).
+Podrobnosti, aktualizace a co dělat, když se plugin nenačte, jsou v
+[`INSTALL.md`](INSTALL.md).
 
 ## Sestavení ze zdrojů
 
 ```bash
-# vyžaduje .NET 10 SDK (Jellyfin 12.1 API cílí net10.0)
+# potřebuješ .NET10 SDK (plugin cílí na Jellyfin12.1 / net10.0)
 dotnet build -c Release Jellyfin.Plugin.Ivysilani
 dotnet publish -c Release -o artifacts Jellyfin.Plugin.Ivysilani
 ```
 
-Test proti **reálnému ČT API** (žádné mocky):
+Testovací harness umí zkontrolovat parsování kategorií, stránkování i resolve
+streamů proti **reálnému ČT API** (žádné nasimulované odpovědi):
 
 ```bash
 cd TestHarness && dotnet run -c Release
 ```
 
-Poslední běh: `VŠECHNY TESTY PROŠLY (0 chyb)` — viz
-[`REPORT.md`](REPORT.md), celý výstup v
-`TestHarness/test-run-output.log`.
+## Co zatím nefunguje
 
-## Známá omezení
+- **Titulky.** ČT je v streamu nabízí a plugin umí zjistit jejich adresy,
+  ale Jellyfin12.1 má v téhle cestě chybu (spadne na `NullReferenceException`
+  při žádosti o titulky) a přítomnost titulkové stopy navíc navede klienta na
+  přehrávací variantu, která u tohoto zdroje končí chybou500. Necháváme tedy
+  zatím titulky být — spolehlivé přehrávání je důležitější. Až to Jellyfin
+  opraví, vrátíme je.
+- Seznam dílů se čte z dat stránky pořadu. U pořadů s desítkami dílů to
+  funguje (ověřeno na stovce+), extrémní případy se stovkami dílů jsme
+  netestovali.
+- Sezónní číslování vychází z údajů ČT. U starších pořadů, kde ČT žádná
+  čísla nemá, díly spadnou do jedné složky bez čísla.
+- Channel nemá vlastní ikonu a PEGI hodnocení je placeholder.
 
-- Seznam epizod se čte z `__NEXT_DATA__` stránky pořadu — u **dlouhých**
-  pořadů (desítky/stovky dílů) není ověřeno, zda ČT stránku nepaginuje.
-- Season/episode číslování je heuristika (vzor `Epizoda N/M` v titulku);
-  jinak řazení podle data. Zatím plochá složka bez sezónních podsložek.
-- Channel nemá vlastní ikonu, PEGI hodnocení je placeholder.
-
-Kompletní přehled v [`REPORT.md`](REPORT.md) — sekce „Co je omezené".
+Jak je plugin uvnitř pospojovaný a na jaké drobnosti si dát při údržbě pozor,
+je v [`POZNAMKY.md`](POZNAMKY.md).
 
 ## Disclaimer
 
-- Oficiálně **neoficiální**, žádná afilace s ČT ani s Jellyfin Project.
-- Používá veřejné, neautentizované endpointy přehrávače iVysílání; mohou se
-  kdykoli změnit (stejně jako to dřív udělali s yt-dlp).
-- Plugin **nestahuje ani neukládá obsah**, jen streamuje pro vlastní
-  přehrávání. Respektuj podmínky používání iVysílání.
+- Plugin oficiálně **neoficiální** — žádná afilace s ČT ani s Jellyfin.
+- Používá veřejné neautentizované endpointy iVysílání; mohou se kdykoli
+  změnit.
+- Plugin nic nestahuje ani neukládá, jen streamuje pro osobní přehrávání.
+  Respektuj podmínky používání iVysílání.
 
 ## License
 
