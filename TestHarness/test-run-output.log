@@ -1,0 +1,95 @@
+=== iVysílání plugin — test harness proti reálnému ČT API ===
+Spuštěno: 2026-10-03 19:14:14 +02:00
+
+--- Vstupní URL: https://www.ceskatelevize.cz/porady/16208367858-na-telo/224512120130001
+    ParseShowId => 16208367858
+    Pořad:   Na tělo  (showId=16208367858)
+    Popis:   Vrásky přibyly, životní jistoty ubyly. Sedm spolužáků vyráží po třiceti letech na školní sraz, který…
+    Obrázek: https://ctfs.ceskatelevize.cz/img/YbYtCvM9R5EGNy3GLsydAH7ZOV1bAIHUtTUymVqCRwY/rs:fit:480:270/sh:0.5/plain/s3/porady-s3/66602233ca665c5f500e72d3/card/na-telo.8f2d7.jpg
+    Epizody (5):
+      [playable] idx=  1 id=224512120130001  dur=00:53:38 date=2026-09-04  "Epizoda 1/9"
+      [playable] idx=  2 id=224512120130002  dur=00:50:13 date=2026-09-11  "Epizoda 2/9"
+      [playable] idx=  3 id=224512120130003  dur=00:52:24 date=2026-09-18  "Epizoda 3/9"
+      [playable] idx=  4 id=224512120130004  dur=00:52:01 date=2026-09-25  "Epizoda 4/9"
+      [playable] idx=  5 id=224512120130005  dur=00:50:40 date=2026-10-02  "Epizoda 5/9"
+
+--- Vstupní URL: https://www.ceskatelevize.cz/porady/16208367858-na-telo/
+    ParseShowId => 16208367858
+    Pořad:   Na tělo  (showId=16208367858)
+    Popis:   Vrásky přibyly, životní jistoty ubyly. Sedm spolužáků vyráží po třiceti letech na školní sraz, který…
+    Obrázek: https://ctfs.ceskatelevize.cz/img/YbYtCvM9R5EGNy3GLsydAH7ZOV1bAIHUtTUymVqCRwY/rs:fit:480:270/sh:0.5/plain/s3/porady-s3/66602233ca665c5f500e72d3/card/na-telo.8f2d7.jpg
+    Epizody (5):
+      [playable] idx=  1 id=224512120130001  dur=00:53:38 date=2026-09-04  "Epizoda 1/9"
+      [playable] idx=  2 id=224512120130002  dur=00:50:13 date=2026-09-11  "Epizoda 2/9"
+      [playable] idx=  3 id=224512120130003  dur=00:52:24 date=2026-09-18  "Epizoda 3/9"
+      [playable] idx=  4 id=224512120130004  dur=00:52:01 date=2026-09-25  "Epizoda 4/9"
+      [playable] idx=  5 id=224512120130005  dur=00:50:40 date=2026-10-02  "Epizoda 5/9"
+
+=== Resolve streamu pro přehrávání (GetChannelItemMediaInfo ekvivalent) ===
+--- Resolve episodeId=224512120130001 ("Epizoda 1/9")
+    title:         Na tělo | Na tělo | 1
+    showTitle:     Na tělo
+    episodeTitle:  Na tělo | 1
+    duration (s):  3217.92
+    isPlayable:    True
+    playableFrom:  06/05/2024 00:00:00 +02:00
+    playableTo:    
+    previewImage:  https://ctfs.ceskatelevize.cz/porady-s3/episode/66602233ca665c5f500e72d4/card/epizoda-1-9.ef33f.jpeg
+    subtitles:     1 track(s) (lang=ces)
+    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=aaf635f43dbf57f5b1898d507ef95f1cd1c2f69e&userId=e3e5778d-4ec9-475b-b20f-d7013ff07da1&contentI…
+    Playlist fetch: OK, 6502 bajtů, #EXTM3U header = True
+
+--- Resolve episodeId=224512120130002 ("Epizoda 2/9")
+    title:         Na tělo | Na tělo | 2
+    showTitle:     Na tělo
+    episodeTitle:  Na tělo | 2
+    duration (s):  3012.84
+    isPlayable:    True
+    playableFrom:  06/05/2024 00:00:00 +02:00
+    playableTo:    
+    previewImage:  https://ctfs.ceskatelevize.cz/porady-s3/episode/666034801041b402c00f09b2/card/epizoda-2-9.3928e.jpeg
+    subtitles:     1 track(s) (lang=ces)
+    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=6f20db2a4062607cf10fa500d273869bdcd8f96a&userId=951bd874-b280-4ca4-a6cf-d71d1eafdb59&contentI…
+    Playlist fetch: OK, 2019 bajtů, #EXTM3U header = True
+
+--- Resolve episodeId=224512120130003 ("Epizoda 3/9")
+    title:         Na tělo | Na tělo | 3
+    showTitle:     Na tělo
+    episodeTitle:  Na tělo | 3
+    duration (s):  3144
+    isPlayable:    True
+    playableFrom:  06/05/2024 00:00:00 +02:00
+    playableTo:    
+    previewImage:  https://ctfs.ceskatelevize.cz/porady-s3/episode/666043808ebfdd0cc90a85a2/card/epizoda-3-9.ea00d.jpeg
+    subtitles:     1 track(s) (lang=ces)
+    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=b10e3e44e4e306f6f2403460ad908d41303b921e&userId=c00bae5a-dc50-45f5-8f45-c72d3439afa2&contentI…
+    Playlist fetch: OK, 2019 bajtů, #EXTM3U header = True
+
+--- Resolve episodeId=224512120130004 ("Epizoda 4/9")
+    title:         Na tělo | Na tělo | 4
+    showTitle:     Na tělo
+    episodeTitle:  Na tělo | 4
+    duration (s):  3120.92
+    isPlayable:    True
+    playableFrom:  06/05/2024 00:00:00 +02:00
+    playableTo:    
+    previewImage:  https://ctfs.ceskatelevize.cz/porady-s3/episode/666049238ebfdd0cc90a85a3/card/epizoda-4-9.73da8.jpeg
+    subtitles:     1 track(s) (lang=ces)
+    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=37f9f5452c58ec770eda492ea04265a915d9cf61&userId=5da9431f-2107-4833-aaf8-8f6f14e32bca&contentI…
+    Playlist fetch: OK, 2019 bajtů, #EXTM3U header = True
+
+--- Resolve episodeId=224512120130005 ("Epizoda 5/9")
+    title:         Na tělo | Na tělo | 5
+    showTitle:     Na tělo
+    episodeTitle:  Na tělo | 5
+    duration (s):  3039.72
+    isPlayable:    True
+    playableFrom:  06/05/2024 00:00:00 +02:00
+    playableTo:    
+    previewImage:  https://ctfs.ceskatelevize.cz/porady-s3/episode/666053e8fd0e9262b50ae369/card/epizoda-5-9.4551e.jpeg
+    subtitles:     1 track(s) (lang=ces)
+    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=57d1f1c5b7077ada19744fdff66b903b02e32a7f&userId=75e04005-4ba0-4d4f-a7fa-615cec62198b&contentI…
+    Playlist fetch: OK, 2019 bajtů, #EXTM3U header = True
+
+=== Shrnutí ===
+VŠECHNY TESTY PROŠLY (0 chyb).

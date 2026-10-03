@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>IvysilaniTestHarness</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.1" />
+  </ItemGroup>
+
+  <!--
+    Compiles the real plugin's CtApi client/models directly (no Jellyfin.Controller/Model
+    dependency is needed by this code), so the harness exercises the exact same parsing and
+    HTTP logic that ships inside the plugin DLL, not a reimplementation of it.
+  -->
+  <ItemGroup>
+    <Compile Include="..\Jellyfin.Plugin.Ivysilani\CtApi\Models.cs" Link="CtApi\Models.cs" />
+    <Compile Include="..\Jellyfin.Plugin.Ivysilani\CtApi\CtApiClient.cs" Link="CtApi\CtApiClient.cs" />
+  </ItemGroup>
+
+</Project>

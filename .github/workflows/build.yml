@@ -1,0 +1,50 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build plugin
+        run: dotnet build -c Release Jellyfin.Plugin.Ivysilani
+
+      - name: Publish plugin
+        run: dotnet publish -c Release -o publish-out Jellyfin.Plugin.Ivysilani
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jellyfin.Plugin.Ivysilani
+          path: |
+            publish-out/*.dll
+            Jellyfin.Plugin.Ivysilani/meta.json
+
+  test-harness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build test harness
+        run: dotnet build -c Release TestHarness
+
+      # Spouští se jen ručně (dispatch) — test jde proti živému ČT API,
+      # v PR ho nechceme řešit kvůli proměnlivé dostupnosti třetí strany.
+      - name: Run test harness (manual only)
+        if: github.event_name == 'workflow_dispatch'
+        run: dotnet run -c Release --project TestHarness
