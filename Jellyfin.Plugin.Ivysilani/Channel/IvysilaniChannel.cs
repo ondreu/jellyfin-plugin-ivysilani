@@ -16,9 +16,10 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.Ivysilani.Channel;
 
 /// <summary>
-/// Jellyfin channel exposing a user-curated set of ceskatelevize.cz (iVysílání) shows.
-/// Browsing hits only metadata/HTML pages; actual video is streamed directly from ČT's
-/// CDN via an HLS URL resolved at playback time. No media is ever downloaded by this plugin.
+/// Jellyfin channel exposing the full iVysílání catalog (by category) plus a user-curated
+/// "Oblíbené" list. Browsing hits only metadata/GraphQL calls; actual video is streamed
+/// directly from ČT's CDN via an HLS URL resolved at playback time. No media is ever
+/// downloaded by this plugin.
 /// </summary>
 public sealed class IvysilaniChannel : IChannel, IRequiresMediaInfoCallback
 {
@@ -27,9 +28,11 @@ public sealed class IvysilaniChannel : IChannel, IRequiresMediaInfoCallback
 
     private const string PlaybackReferer = "https://www.ceskatelevize.cz/";
 
+    private const string MovieShowType = "movie";
+
     // Root folder ids. Category/show folders are namespaced below so GetChannelItems can tell
-    // them apart without a second round trip: "cat:{categoryId}" and "show:{slug}" come from the
-    // full catalog (lazily browsed per-category), "fav"/"fav:{showId}" from the user's curated list.
+    // them apart without a second round trip: "cat:{categoryId}" and "show:{idec}" come from the
+    // full catalog, "fav"/"fav:{showId}" from the user's curated list.
     private const string FavoritesFolderId = "fav";
     private const string CategoryFolderPrefix = "cat:";
     private const string FavoriteShowFolderPrefix = "fav:";
@@ -53,10 +56,10 @@ public sealed class IvysilaniChannel : IChannel, IRequiresMediaInfoCallback
     public string Name => "iVysílání";
 
     /// <inheritdoc />
-    public string Description => "Vybrané pořady z iVysílání (ceskatelevize.cz), streamované přímo ze serverů ČT.";
+    public string Description => "Celý katalog iVysílání (ceskatelevize.cz) podle kategorií, streamovaný přímo ze serverů ČT.";
 
     /// <inheritdoc />
-    public string DataVersion => "1";
+    public string DataVersion => "2";
 
     /// <inheritdoc />
     public string HomePageUrl => "https://www.ceskatelevize.cz/ivysilani/";
@@ -73,8 +76,7 @@ public sealed class IvysilaniChannel : IChannel, IRequiresMediaInfoCallback
             ContentTypes = new List<ChannelMediaContentType> { ChannelMediaContentType.Episode, ChannelMediaContentType.Movie },
             DefaultSortFields = new List<ChannelItemSortField> { ChannelItemSortField.Name, ChannelItemSortField.PremiereDate },
             SupportsSortOrderToggle = false,
-            SupportsContentDownloading = false,
-            MaxPageSize = CtApiClient.CatalogPageSize
+            SupportsContentDownloading = false
         };
     }
 
@@ -112,8 +114,7 @@ public sealed class IvysilaniChannel : IChannel, IRequiresMediaInfoCallback
         if (folderId.StartsWith(CategoryFolderPrefix, StringComparison.Ordinal))
         {
             var categoryId = folderId[CategoryFolderPrefix.Length..];
-            return await GetCategoryShowsPageAsync(categoryId, query.StartIndex, query.Limit, ttl, cancellationToken)
-                .ConfigureAwait(false);
+            return await GetCategoryFolderAsync(categoryId, ttl, cancellationToken).ConfigureAwait(false);
         }
 
         if (folderId.StartsWith(FavoriteShowFolderPrefix, StringComparison.Ordinal))
@@ -128,14 +129,15 @@ public sealed class IvysilaniChannel : IChannel, IRequiresMediaInfoCallback
                 return new ChannelItemResult { Items = Array.Empty<ChannelItemInfo>() };
             }
 
-            return await GetShowEpisodesAsync(sourceUrl, ttl, cancellationToken).ConfigureAwait(false);
+            var show = await _ctApiClient.GetShowAsync(sourceUrl, ttl, cancellationToken).ConfigureAwait(false);
+            return BuildEpisodesResult(show?.Episodes ?? Array.Empty<CtEpisode>());
         }
 
         if (folderId.StartsWith(CatalogShowFolderPrefix, StringComparison.Ordinal))
         {
-            var slug = folderId[CatalogShowFolderPrefix.Length..];
-            var sourceUrl = $"https://www.ceskatelevize.cz/porady/{slug}/";
-            return await GetShowEpisodesAsync(sourceUrl, ttl, cancellationToken).ConfigureAwait(false);
+            var seedIdec = folderId[CatalogShowFolderPrefix.Length..];
+            var episodes = await _ctApiClient.GetEpisodesAsync(seedIdec, ttl, cancellationToken).ConfigureAwait(false);
+            return BuildEpisodesResult(episodes ?? Array.Empty<CtEpisode>());
         }
 
         _logger.LogWarning("Unrecognized channel folder id '{FolderId}'.", folderId);
@@ -148,19 +150,23 @@ public sealed class IvysilaniChannel : IChannel, IRequiresMediaInfoCallback
         var resolved = await _ctApiClient.ResolveStreamAsync(id, cancellationToken).ConfigureAwait(false);
         if (resolved is null)
         {
-            _logger.LogWarning("Could not resolve a stream for episode '{EpisodeId}'", id);
+            _logger.LogWarning("Could not resolve a stream for content id '{ContentId}'", id);
             return Array.Empty<MediaSourceInfo>();
         }
 
         if (resolved.Playability is { IsPlayable: false })
         {
-            _logger.LogInformation("Episode '{EpisodeId}' is no longer playable on ČT, hiding its stream.", id);
+            _logger.LogInformation("Content '{ContentId}' is no longer playable on ČT, hiding its stream.", id);
             return Array.Empty<MediaSourceInfo>();
         }
 
         var mediaSource = new MediaSourceInfo
         {
-            Id = id,
+            // Jellyfin's HLS playback pipeline Guid.Parse()s whatever mediaSourceId it's given
+            // once it can't find an exact string match among the returned sources; a bare ČT id
+            // (e.g. "224512120130001") isn't Guid-shaped and crashes that with a 500. Using a
+            // deterministic MD5-derived Guid keeps lookups stable while satisfying that parse.
+            Id = CtApiClient.ToMediaSourceGuid(id).ToString("N"),
             Path = resolved.HlsUrl,
             Protocol = MediaProtocol.Http,
             Container = "hls",
@@ -305,56 +311,69 @@ public sealed class IvysilaniChannel : IChannel, IRequiresMediaInfoCallback
     }
 
     /// <summary>
-    /// One page of a full-catalog category's shows (e.g. all 2600+ "Dokumenty"), fetched lazily
-    /// and only for the page Jellyfin actually asked for via <see cref="InternalChannelItemQuery"/>.
+    /// The COMPLETE show listing of a full-catalog category (e.g. all ~2600 "Dokumenty").
+    /// Jellyfin's ChannelManager calls GetChannelItems exactly once per folder with no paging
+    /// parameters and syncs/paginates the full result itself - a per-request lazy page here
+    /// would silently truncate every category to its first page (the v1.1.0 bug). Movies are
+    /// emitted directly as playable media; series as sub-folders keyed by a seed episode id.
     /// </summary>
-    private async Task<ChannelItemResult> GetCategoryShowsPageAsync(
-        string categoryId,
-        int? startIndex,
-        int? limit,
-        TimeSpan ttl,
-        CancellationToken cancellationToken)
+    private async Task<ChannelItemResult> GetCategoryFolderAsync(string categoryId, TimeSpan ttl, CancellationToken cancellationToken)
     {
-        var offset = Math.Max(startIndex ?? 0, 0);
-        var pageSize = limit is > 0 ? limit.Value : CtApiClient.CatalogPageSize;
-
-        var page = await _ctApiClient.GetCategoryShowsAsync(categoryId, pageSize, offset, ttl, cancellationToken)
-            .ConfigureAwait(false);
+        var page = await _ctApiClient.GetFullCategoryAsync(categoryId, ttl, cancellationToken).ConfigureAwait(false);
         if (page is null)
         {
-            _logger.LogWarning("Could not load category '{CategoryId}' (offset {Offset}).", categoryId, offset);
+            _logger.LogWarning("Could not load category '{CategoryId}'.", categoryId);
             return new ChannelItemResult { Items = Array.Empty<ChannelItemInfo>() };
         }
 
-        var items = page.Items
-            .Where(s => s.Playable)
-            .Select(s => new ChannelItemInfo
+        var items = new List<ChannelItemInfo>();
+        foreach (var show in page.Items)
+        {
+            if (!show.Playable)
             {
-                Id = CatalogShowFolderPrefix + s.Slug,
-                Name = s.Title,
-                Type = ChannelItemType.Folder,
-                FolderType = ChannelFolderType.Series,
-                Overview = s.ShortDescription,
-                ImageUrl = s.ImageUrl
-            })
-            .ToList<ChannelItemInfo>();
+                continue;
+            }
 
-        return new ChannelItemResult { Items = items, TotalRecordCount = page.TotalCount };
+            if (string.Equals(show.ShowType, MovieShowType, StringComparison.OrdinalIgnoreCase))
+            {
+                items.Add(new ChannelItemInfo
+                {
+                    Id = show.Idec,
+                    Name = show.Title,
+                    Type = ChannelItemType.Media,
+                    MediaType = ChannelMediaType.Video,
+                    ContentType = ChannelMediaContentType.Movie,
+                    Overview = show.ShortDescription,
+                    ImageUrl = show.ImageUrl,
+                    RunTimeTicks = show.DurationSeconds.HasValue
+                        ? TimeSpan.FromSeconds(show.DurationSeconds.Value).Ticks
+                        : null
+                });
+            }
+            else
+            {
+                items.Add(new ChannelItemInfo
+                {
+                    Id = CatalogShowFolderPrefix + show.Idec,
+                    Name = show.Title,
+                    Type = ChannelItemType.Folder,
+                    FolderType = ChannelFolderType.Series,
+                    Overview = show.ShortDescription,
+                    ImageUrl = show.ImageUrl
+                });
+            }
+        }
+
+        return new ChannelItemResult { Items = items, TotalRecordCount = items.Count };
     }
 
     /// <summary>
-    /// Episode listing for one show, regardless of whether it was reached via "Oblíbené" or via
-    /// a catalog category - both resolve to a plain ceskatelevize.cz show URL by this point.
+    /// Maps a show's full episode list to channel media items (shared by "Oblíbené" shows and
+    /// catalog shows - both resolve to a plain <see cref="CtEpisode"/> list by this point).
     /// </summary>
-    private async Task<ChannelItemResult> GetShowEpisodesAsync(string sourceUrl, TimeSpan ttl, CancellationToken cancellationToken)
+    private static ChannelItemResult BuildEpisodesResult(IReadOnlyList<CtEpisode> episodes)
     {
-        var show = await _ctApiClient.GetShowAsync(sourceUrl, ttl, cancellationToken).ConfigureAwait(false);
-        if (show is null)
-        {
-            return new ChannelItemResult { Items = Array.Empty<ChannelItemInfo>() };
-        }
-
-        var items = show.Episodes
+        var items = episodes
             .Where(e => e.Playable)
             .Select(e => new ChannelItemInfo
             {
@@ -367,6 +386,7 @@ public sealed class IvysilaniChannel : IChannel, IRequiresMediaInfoCallback
                 ContentType = ChannelMediaContentType.Episode,
                 ImageUrl = e.ImageUrl,
                 IndexNumber = e.EpisodeIndex,
+                ParentIndexNumber = e.SeasonNumber,
                 PremiereDate = e.BroadcastDate?.UtcDateTime,
                 DateCreated = e.BroadcastDate?.UtcDateTime,
                 RunTimeTicks = e.DurationSeconds.HasValue

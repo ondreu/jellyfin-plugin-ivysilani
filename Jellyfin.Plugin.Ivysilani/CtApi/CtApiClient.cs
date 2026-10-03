@@ -5,7 +5,7 @@ using System.Globalization;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -17,8 +17,9 @@ namespace Jellyfin.Plugin.Ivysilani.CtApi;
 
 /// <summary>
 /// Talks to the public (unauthenticated) ceskatelevize.cz / api.ceskatelevize.cz endpoints:
-/// parses a show's "/porady/{id}-..." page for its episode list, and resolves an episode's
-/// playable HLS stream via the stream-data API. Never downloads media, only metadata/playlist URLs.
+/// resolves a show's full episode list and the full catalog (categories + shows) via the site's
+/// own GraphQL API, and resolves an episode's/movie's playable HLS stream via the stream-data
+/// API. Never downloads media, only metadata/playlist URLs.
 /// </summary>
 public sealed class CtApiClient : IDisposable
 {
@@ -35,22 +36,32 @@ public sealed class CtApiClient : IDisposable
 
     private const string GraphQlUrl = "https://api.ceskatelevize.cz/graphql/";
 
-    // Matches the page's own default page size for category listings (confirmed against the
-    // live site's bundled JS); kept as the default/clamp for our own category paging too.
+    // Matches the page's own default page size for category/episode listings (confirmed against
+    // the live site's bundled JS); kept as the page size for our own internal pagination loops.
     private const int DefaultCatalogPageSize = 80;
 
     private const int MaxRetryAttempts = 3;
 
-    // The ČT catalog GraphQL query does not expose an "all shows" or "list every category" field;
-    // this is the equivalent of the query the website itself sends for a category's flat show
-    // listing (category.programmeFind), reverse-engineered from the site's own JS bundle - see
-    // REPORT.md "v1.1" for how it was found. Trimmed to just the fields this plugin needs.
+    // Reverse-engineered from the live site's production JS bundle (see REPORT.md "v1.1"/"v1.2"
+    // for how); category.programmeFind gives the FULL flat show list for a category (leaf or
+    // top-level), including showType ("series"/"movie"), idec (a playable content id - directly
+    // playable for a movie, or a seed episode id for a series) and duration (movies only).
     private const string CategoryShowsQuery =
         "query IvysilaniCatalog($limit:PaginationAmount!$offset:Int!$categoryId:String!){"
         + "category(categoryId:$categoryId){"
         + "programmeFind(limit:$limit offset:$offset){"
-        + "totalCount items{id slug title shortDescription isPlayable images{card(width:480)}}"
+        + "totalCount items{id slug title shortDescription isPlayable showType idec duration images{card(width:480)}}"
         + "}}}";
+
+    // episodesPreviewFind(idec:...) resolves ALL episodes of the show that idec belongs to
+    // (any one episode id of the show works as the seed) - this is what the site itself calls to
+    // page through a show's episode list; the show's own page only embeds the first batch in its
+    // server-rendered HTML, which is NOT the full list for shows with more episodes than that.
+    private const string EpisodesQuery =
+        "query GetEpisodes($idec:String!$limit:PaginationAmount!$offset:Int!$orderBy:EpisodeOrderByType!$onlyPlayable:Boolean){"
+        + "episodesPreviewFind(idec:$idec limit:$limit offset:$offset orderBy:$orderBy onlyPlayable:$onlyPlayable){"
+        + "totalCount items{id title description playable duration showId showTitle season{title}images{card(width:480)}date{datetime}}"
+        + "}}";
 
     private static readonly TimeSpan StreamCacheTtl = TimeSpan.FromMinutes(20);
 
@@ -62,9 +73,17 @@ public sealed class CtApiClient : IDisposable
 
     private static readonly Regex EpisodeIndexRegex = new(@"(\d+)\s*/\s*(\d+)", RegexOptions.Compiled);
 
-    private static readonly Regex SingleNumberRegex = new(@"\d+", RegexOptions.Compiled);
-
     private static readonly Regex ImageWidthRegex = new("\"width\":(\\d+)", RegexOptions.Compiled);
+
+    private static readonly Regex SeasonArabicRegex = new(@"^\s*(\d+)\.?", RegexOptions.Compiled);
+
+    // Longest-prefix-first so "III" is tried before "II"/"I" match as a false-positive prefix.
+    private static readonly (string Roman, int Value)[] RomanNumerals =
+    {
+        ("XX", 20), ("XIX", 19), ("XVIII", 18), ("XVII", 17), ("XVI", 16), ("XV", 15), ("XIV", 14),
+        ("XIII", 13), ("XII", 12), ("XI", 11), ("X", 10), ("IX", 9), ("VIII", 8), ("VII", 7),
+        ("VI", 6), ("V", 5), ("IV", 4), ("III", 3), ("II", 2), ("I", 1)
+    };
 
     // Top category nav links look like:
     // <a ... data-focus-id="nav-Seriály" href="/ivysilani/kategorie/3976-serialy/">Seriály</a>
@@ -73,22 +92,25 @@ public sealed class CtApiClient : IDisposable
         RegexOptions.Compiled);
 
     /// <summary>
-    /// Default number of shows to return per catalog category page, matching the ČT website's
-    /// own default. Exposed so the channel can advertise it as its preferred page size.
+    /// Default number of items to request per page in our own internal catalog/episode
+    /// pagination loops, matching the ČT website's own default.
     /// </summary>
     public static int CatalogPageSize => DefaultCatalogPageSize;
 
     private readonly HttpClient _httpClient;
     private readonly ILogger<CtApiClient> _logger;
 
-    // Guards against hammering ceskatelevize.cz/api.ceskatelevize.cz if several channel folders
-    // are browsed/refreshed at once - keeps us well below anything that would trip the WAF.
-    private readonly SemaphoreSlim _requestGate = new(2, 2);
+    // Guards against hammering ceskatelevize.cz/api.ceskatelevize.cz when a category/show with
+    // many pages is fetched (fan-out of page requests) - keeps us well below anything that would
+    // trip the WAF, while still being fast enough for categories with thousands of shows.
+    private readonly SemaphoreSlim _requestGate = new(4, 4);
 
     private readonly ConcurrentDictionary<string, CacheEntry<CtShowInfo>> _showCache = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, CacheEntry<CtStreamResolveResult>> _streamCache = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, CacheEntry<IReadOnlyList<CtCategory>>> _categoriesCache = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, CacheEntry<CtCatalogPage>> _categoryPageCache = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, CacheEntry<CtCatalogPage>> _categoryFullCache = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, CacheEntry<IReadOnlyList<CtEpisode>>> _episodesCache = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CtApiClient"/> class.
@@ -126,7 +148,24 @@ public sealed class CtApiClient : IDisposable
     }
 
     /// <summary>
-    /// Fetches and parses a show's page, returning its title and currently-listed episodes.
+    /// Computes a deterministic <see cref="Guid"/> for a ČT content id (episode id or movie
+    /// idec). Jellyfin's HLS playback pipeline (<c>StreamingHelpers.GetStreamingState</c>) calls
+    /// <c>Guid.Parse</c> on the requested <c>mediaSourceId</c> whenever it can't find an exact
+    /// string match among the returned <see cref="MediaBrowser.Model.Dto.MediaSourceInfo"/> - a
+    /// plain ČT id (e.g. "224512120130001") is not Guid-shaped, which crashes that call with
+    /// <c>FormatException</c> (HTTP 500). Using this as <c>MediaSourceInfo.Id</c> keeps it
+    /// Guid-parseable while staying stable/deterministic per content id.
+    /// </summary>
+    /// <param name="contentId">The ČT episode id or movie idec.</param>
+    /// <returns>A deterministic GUID derived from <paramref name="contentId"/>.</returns>
+    public static Guid ToMediaSourceGuid(string contentId)
+    {
+        var hash = MD5.HashData(Encoding.UTF8.GetBytes(contentId));
+        return new Guid(hash);
+    }
+
+    /// <summary>
+    /// Fetches a show's metadata and full (fully paginated) episode list.
     /// Results are cached in-process for <paramref name="ttl"/>.
     /// </summary>
     /// <param name="sourceUrl">The show or episode URL as configured by the user.</param>
@@ -150,12 +189,25 @@ public sealed class CtApiClient : IDisposable
         try
         {
             var html = await FetchStringAsync(NormalizeUrl(sourceUrl), cancellationToken).ConfigureAwait(false);
-            var show = ParseShowPage(html, showId);
-            if (show is not null)
+            var meta = ParseShowMeta(html, showId);
+            if (meta is null)
             {
-                _showCache[showId] = new CacheEntry<CtShowInfo>(show, DateTime.UtcNow.Add(ttl));
+                return null;
             }
 
+            IReadOnlyList<CtEpisode> episodes = Array.Empty<CtEpisode>();
+            if (!string.IsNullOrEmpty(meta.Value.Idec))
+            {
+                episodes = await GetEpisodesAsync(meta.Value.Idec!, ttl, cancellationToken).ConfigureAwait(false)
+                    ?? Array.Empty<CtEpisode>();
+            }
+            else
+            {
+                _logger.LogWarning("Show '{ShowId}' has no idec in its page data, can't list episodes.", showId);
+            }
+
+            var show = new CtShowInfo(showId, meta.Value.Title, meta.Value.ShortDescription, meta.Value.ImageUrl, episodes);
+            _showCache[showId] = new CacheEntry<CtShowInfo>(show, DateTime.UtcNow.Add(ttl));
             return show;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
@@ -166,34 +218,265 @@ public sealed class CtApiClient : IDisposable
     }
 
     /// <summary>
-    /// Resolves an episode's current playable HLS master playlist URL and playability window.
-    /// Results are cached briefly in-process since the returned URL contains a short-lived token.
+    /// Fetches the complete, fully-paginated episode list for the show that <paramref name="seedIdec"/>
+    /// belongs to (any one episode id of the show works). Results are cached in-process for
+    /// <paramref name="ttl"/>. Duplicate episode titles (the same "Epizoda N/M" number reused
+    /// across seasons) are disambiguated by appending the season name or broadcast date.
     /// </summary>
-    /// <param name="episodeId">The ČT episode id (idec).</param>
+    /// <param name="seedIdec">Any episode id (idec) belonging to the show.</param>
+    /// <param name="ttl">How long to keep the parsed result cached.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The resolve result, or <c>null</c> if the episode has no playable stream right now.</returns>
-    public async Task<CtStreamResolveResult?> ResolveStreamAsync(string episodeId, CancellationToken cancellationToken)
+    /// <returns>The full episode list, or <c>null</c> if it could not be fetched.</returns>
+    public async Task<IReadOnlyList<CtEpisode>?> GetEpisodesAsync(string seedIdec, TimeSpan ttl, CancellationToken cancellationToken)
     {
-        if (_streamCache.TryGetValue(episodeId, out var cached) && cached.ExpiresAtUtc > DateTime.UtcNow)
+        if (_episodesCache.TryGetValue(seedIdec, out var cached) && cached.ExpiresAtUtc > DateTime.UtcNow)
         {
             return cached.Value;
         }
 
-        var url = string.Format(CultureInfo.InvariantCulture, StreamResolveUrlTemplate, Uri.EscapeDataString(episodeId));
+        var firstPage = await FetchEpisodesPageAsync(seedIdec, DefaultCatalogPageSize, 0, cancellationToken).ConfigureAwait(false);
+        if (firstPage is null)
+        {
+            return null;
+        }
+
+        var all = new List<CtEpisode>(firstPage.Value.Items);
+        var remainingOffsets = new List<int>();
+        for (var offset = DefaultCatalogPageSize; offset < firstPage.Value.TotalCount; offset += DefaultCatalogPageSize)
+        {
+            remainingOffsets.Add(offset);
+        }
+
+        if (remainingOffsets.Count > 0)
+        {
+            _logger.LogInformation(
+                "Show (seed idec '{SeedIdec}') has {Total} episodes, fetching {Pages} more page(s).",
+                seedIdec,
+                firstPage.Value.TotalCount,
+                remainingOffsets.Count);
+
+            var pages = await Task.WhenAll(
+                remainingOffsets.Select(offset => FetchEpisodesPageAsync(seedIdec, DefaultCatalogPageSize, offset, cancellationToken)))
+                .ConfigureAwait(false);
+
+            foreach (var page in pages)
+            {
+                if (page is not null)
+                {
+                    all.AddRange(page.Value.Items);
+                }
+            }
+        }
+
+        var finalList = FinalizeEpisodes(all);
+        _episodesCache[seedIdec] = new CacheEntry<IReadOnlyList<CtEpisode>>(finalList, DateTime.UtcNow.Add(ttl));
+        return finalList;
+    }
+
+    private async Task<(int TotalCount, List<CtEpisode> Items)?> FetchEpisodesPageAsync(
+        string seedIdec,
+        int limit,
+        int offset,
+        CancellationToken cancellationToken)
+    {
+        var requestBody = JsonSerializer.Serialize(new
+        {
+            operationName = "GetEpisodes",
+            query = EpisodesQuery,
+            variables = new { idec = seedIdec, limit, offset, orderBy = "oldest", onlyPlayable = true }
+        });
+
+        try
+        {
+            var json = await PostJsonAsync(GraphQlUrl, requestBody, cancellationToken).ConfigureAwait(false);
+            return ParseEpisodesResponse(json, seedIdec);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            _logger.LogWarning(ex, "Failed to fetch episodes page (seed idec '{SeedIdec}', offset {Offset})", seedIdec, offset);
+            return null;
+        }
+    }
+
+    private (int TotalCount, List<CtEpisode> Items)? ParseEpisodesResponse(string json, string seedIdec)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        if (root.TryGetProperty("errors", out var errorsEl) && errorsEl.ValueKind == JsonValueKind.Array
+            && errorsEl.GetArrayLength() > 0)
+        {
+            _logger.LogInformation(
+                "GraphQL error fetching episodes for seed idec '{SeedIdec}': {Message}",
+                seedIdec,
+                GetString(errorsEl[0], "message"));
+            return null;
+        }
+
+        if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object
+            || !data.TryGetProperty("episodesPreviewFind", out var find) || find.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var totalCount = find.TryGetProperty("totalCount", out var totalCountEl) && totalCountEl.ValueKind == JsonValueKind.Number
+            ? totalCountEl.GetInt32()
+            : 0;
+
+        var items = new List<CtEpisode>();
+        if (find.TryGetProperty("items", out var itemsEl) && itemsEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in itemsEl.EnumerateArray())
+            {
+                var id = GetString(item, "id");
+                var showId = GetString(item, "showId");
+                var title = GetString(item, "title");
+                if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(showId) || string.IsNullOrEmpty(title))
+                {
+                    continue;
+                }
+
+                var playable = item.TryGetProperty("playable", out var playableEl) && playableEl.ValueKind == JsonValueKind.True;
+                var description = GetString(item, "description");
+                var showTitle = GetString(item, "showTitle") ?? showId;
+
+                int? durationSeconds = item.TryGetProperty("duration", out var durationEl) && durationEl.ValueKind == JsonValueKind.Number
+                    ? durationEl.GetInt32()
+                    : null;
+
+                string? imageUrl = null;
+                if (item.TryGetProperty("images", out var imagesEl) && imagesEl.ValueKind == JsonValueKind.Object
+                    && imagesEl.TryGetProperty("card", out var cardEl) && cardEl.ValueKind == JsonValueKind.String)
+                {
+                    imageUrl = cardEl.GetString();
+                }
+
+                DateTimeOffset? broadcastDate = null;
+                if (item.TryGetProperty("date", out var dateEl) && dateEl.ValueKind == JsonValueKind.Object)
+                {
+                    broadcastDate = GetDateTimeOffset(dateEl, "datetime");
+                }
+
+                string? seasonTitle = null;
+                if (item.TryGetProperty("season", out var seasonEl) && seasonEl.ValueKind == JsonValueKind.Object)
+                {
+                    seasonTitle = GetString(seasonEl, "title");
+                }
+
+                var (episodeIndex, episodeCount) = ParseEpisodeIndex(title);
+                var seasonNumber = ParseSeasonNumber(seasonTitle);
+
+                items.Add(new CtEpisode(
+                    id,
+                    showId,
+                    showTitle,
+                    title,
+                    description,
+                    playable,
+                    durationSeconds,
+                    imageUrl,
+                    broadcastDate,
+                    episodeIndex,
+                    episodeCount,
+                    seasonTitle,
+                    seasonNumber));
+            }
+        }
+
+        return (totalCount, items);
+    }
+
+    /// <summary>
+    /// Disambiguates duplicate episode titles (the same "Epizoda N/M" reused across seasons —
+    /// e.g. Babylon Berlín has an "Epizoda 1/8" in both its 1st and 2nd season) and applies a
+    /// final, deterministic sort (season, then episode-in-season, then broadcast date).
+    /// </summary>
+    private static List<CtEpisode> FinalizeEpisodes(List<CtEpisode> episodes)
+    {
+        var disambiguated = new List<CtEpisode>(episodes.Count);
+        foreach (var group in episodes.GroupBy(e => e.Title, StringComparer.Ordinal))
+        {
+            if (group.Count() == 1)
+            {
+                disambiguated.Add(group.First());
+                continue;
+            }
+
+            foreach (var episode in group)
+            {
+                var suffix = !string.IsNullOrEmpty(episode.SeasonTitle)
+                    ? $" ({episode.SeasonTitle})"
+                    : episode.BroadcastDate.HasValue
+                        ? $" ({episode.BroadcastDate.Value:yyyy-MM-dd})"
+                        : $" ({episode.Id})";
+                disambiguated.Add(episode with { Title = episode.Title + suffix });
+            }
+        }
+
+        return disambiguated
+            .OrderBy(e => e.SeasonNumber ?? int.MaxValue)
+            .ThenBy(e => e.EpisodeIndex ?? int.MaxValue)
+            .ThenBy(e => e.BroadcastDate ?? DateTimeOffset.MaxValue)
+            .ThenBy(e => e.Title, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static int? ParseSeasonNumber(string? seasonTitle)
+    {
+        if (string.IsNullOrWhiteSpace(seasonTitle))
+        {
+            return null;
+        }
+
+        var trimmed = seasonTitle.Trim();
+        var arabicMatch = SeasonArabicRegex.Match(trimmed);
+        if (arabicMatch.Success)
+        {
+            return int.Parse(arabicMatch.Groups[1].Value, CultureInfo.InvariantCulture);
+        }
+
+        foreach (var (roman, value) in RomanNumerals)
+        {
+            if (trimmed.StartsWith(roman + ".", StringComparison.OrdinalIgnoreCase)
+                || trimmed.StartsWith(roman + " ", StringComparison.OrdinalIgnoreCase))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Resolves an episode's or movie's current playable HLS master playlist URL and
+    /// playability window. Results are cached briefly in-process since the returned URL
+    /// contains a short-lived token.
+    /// </summary>
+    /// <param name="contentId">The ČT episode id or movie idec.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The resolve result, or <c>null</c> if there's no playable stream right now.</returns>
+    public async Task<CtStreamResolveResult?> ResolveStreamAsync(string contentId, CancellationToken cancellationToken)
+    {
+        if (_streamCache.TryGetValue(contentId, out var cached) && cached.ExpiresAtUtc > DateTime.UtcNow)
+        {
+            return cached.Value;
+        }
+
+        var url = string.Format(CultureInfo.InvariantCulture, StreamResolveUrlTemplate, Uri.EscapeDataString(contentId));
         try
         {
             var json = await FetchStringAsync(url, cancellationToken).ConfigureAwait(false);
-            var result = ParseStreamResolve(json, episodeId);
+            var result = ParseStreamResolve(json, contentId);
             if (result is not null)
             {
-                _streamCache[episodeId] = new CacheEntry<CtStreamResolveResult>(result, DateTime.UtcNow.Add(StreamCacheTtl));
+                _streamCache[contentId] = new CacheEntry<CtStreamResolveResult>(result, DateTime.UtcNow.Add(StreamCacheTtl));
             }
 
             return result;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
-            _logger.LogWarning(ex, "Failed to resolve stream for episode '{EpisodeId}'", episodeId);
+            _logger.LogWarning(ex, "Failed to resolve stream for content id '{ContentId}'", contentId);
             return null;
         }
     }
@@ -245,8 +528,68 @@ public sealed class CtApiClient : IDisposable
     }
 
     /// <summary>
-    /// Fetches one page of a catalog category's full show listing via the public GraphQL API
-    /// (<c>category.programmeFind</c>). Results are cached in-process for <paramref name="ttl"/>.
+    /// Fetches the COMPLETE show listing for a catalog category (leaf or top-level), paginating
+    /// through all pages internally. Jellyfin's <c>ChannelManager</c> calls a channel's
+    /// <c>GetChannelItems</c> exactly once per folder with no paging parameters and expects the
+    /// full result in one call (it does its own paging afterwards against its library DB), so a
+    /// per-request lazy page would silently truncate large categories (e.g. ~2600 "Dokumenty").
+    /// Results are cached in-process, as one assembled list, for <paramref name="ttl"/>.
+    /// </summary>
+    /// <param name="categoryId">The numeric category id (e.g. "3976" for "Seriály").</param>
+    /// <param name="ttl">How long to keep the assembled result cached.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The full category, or <c>null</c> if the category doesn't exist or the first page failed.</returns>
+    public async Task<CtCatalogPage?> GetFullCategoryAsync(string categoryId, TimeSpan ttl, CancellationToken cancellationToken)
+    {
+        var cacheKey = "full:" + categoryId;
+        if (_categoryFullCache.TryGetValue(cacheKey, out var cached) && cached.ExpiresAtUtc > DateTime.UtcNow)
+        {
+            return cached.Value;
+        }
+
+        var firstPage = await GetCategoryShowsAsync(categoryId, DefaultCatalogPageSize, 0, ttl, cancellationToken).ConfigureAwait(false);
+        if (firstPage is null)
+        {
+            return null;
+        }
+
+        var allItems = new List<CtCatalogShow>(firstPage.Items);
+        var remainingOffsets = new List<int>();
+        for (var offset = DefaultCatalogPageSize; offset < firstPage.TotalCount; offset += DefaultCatalogPageSize)
+        {
+            remainingOffsets.Add(offset);
+        }
+
+        if (remainingOffsets.Count > 0)
+        {
+            _logger.LogInformation(
+                "Category '{CategoryId}' has {Total} shows, fetching {Pages} more page(s).",
+                categoryId,
+                firstPage.TotalCount,
+                remainingOffsets.Count);
+
+            var pages = await Task.WhenAll(
+                remainingOffsets.Select(offset => GetCategoryShowsAsync(categoryId, DefaultCatalogPageSize, offset, ttl, cancellationToken)))
+                .ConfigureAwait(false);
+
+            foreach (var page in pages)
+            {
+                if (page is not null)
+                {
+                    allItems.AddRange(page.Items);
+                }
+            }
+        }
+
+        var result = new CtCatalogPage(firstPage.TotalCount, allItems);
+        _categoryFullCache[cacheKey] = new CacheEntry<CtCatalogPage>(result, DateTime.UtcNow.Add(ttl));
+        return result;
+    }
+
+    /// <summary>
+    /// Fetches one page of a catalog category's show listing via the public GraphQL API
+    /// (<c>category.programmeFind</c>). Low-level building block used by
+    /// <see cref="GetFullCategoryAsync"/>; results are cached in-process for <paramref name="ttl"/>.
     /// </summary>
     /// <param name="categoryId">The numeric category id (e.g. "3976" for "Seriály").</param>
     /// <param name="limit">Page size, clamped to <see cref="CatalogPageSize"/>.</param>
@@ -326,13 +669,20 @@ public sealed class CtApiClient : IDisposable
                 var id = GetString(item, "id");
                 var slug = GetString(item, "slug");
                 var title = GetString(item, "title");
-                if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(slug) || string.IsNullOrEmpty(title))
+                var idec = GetString(item, "idec");
+                if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(slug) || string.IsNullOrEmpty(title)
+                    || string.IsNullOrEmpty(idec))
                 {
                     continue;
                 }
 
                 var playable = item.TryGetProperty("isPlayable", out var playableEl)
                     && playableEl.ValueKind == JsonValueKind.True;
+                var showType = GetString(item, "showType") ?? "series";
+
+                int? durationSeconds = item.TryGetProperty("duration", out var durationEl) && durationEl.ValueKind == JsonValueKind.Number
+                    ? durationEl.GetInt32()
+                    : null;
 
                 string? imageUrl = null;
                 if (item.TryGetProperty("images", out var imagesEl) && imagesEl.ValueKind == JsonValueKind.Object
@@ -341,7 +691,16 @@ public sealed class CtApiClient : IDisposable
                     imageUrl = cardEl.GetString();
                 }
 
-                items.Add(new CtCatalogShow(id, slug, title, GetString(item, "shortDescription"), playable, imageUrl));
+                items.Add(new CtCatalogShow(
+                    id,
+                    slug,
+                    title,
+                    GetString(item, "shortDescription"),
+                    playable,
+                    imageUrl,
+                    showType,
+                    idec,
+                    durationSeconds));
             }
         }
 
@@ -382,7 +741,7 @@ public sealed class CtApiClient : IDisposable
 
     /// <summary>
     /// Sends a request, retrying transient failures (429/403/5xx, timeouts) with backoff, and
-    /// never running more than two of these requests against ceskatelevize.cz concurrently.
+    /// never running more than a handful of these requests against ceskatelevize.cz concurrently.
     /// </summary>
     private async Task<string> SendWithRetryAsync(Func<HttpRequestMessage> requestFactory, CancellationToken cancellationToken)
     {
@@ -443,7 +802,11 @@ public sealed class CtApiClient : IDisposable
         return Task.Delay(delay, cancellationToken);
     }
 
-    private CtShowInfo? ParseShowPage(string html, string showId)
+    /// <summary>
+    /// Extracts a show's title/description/image and its "idec" (a playable content id of the
+    /// show, used to seed <see cref="GetEpisodesAsync"/>) from its page's embedded __NEXT_DATA__.
+    /// </summary>
+    private (string Title, string? ShortDescription, string? ImageUrl, string? Idec)? ParseShowMeta(string html, string showId)
     {
         var match = NextDataRegex.Match(html);
         if (!match.Success)
@@ -460,119 +823,36 @@ public sealed class CtApiClient : IDisposable
             return null;
         }
 
-        string? showTitle = null;
-        string? shortDescription = null;
-        string? showImageUrl = null;
-
-        if (apollo.TryGetProperty("Show:" + showId, out var showEl))
+        if (!apollo.TryGetProperty("Show:" + showId, out var showEl))
         {
-            showTitle = GetString(showEl, "title");
-            shortDescription = GetString(showEl, "shortDescription");
-            if (showEl.TryGetProperty("images", out var showImages))
-            {
-                showImageUrl = ExtractBestImageUrl(showImages, "card(", "poster(");
-            }
-        }
-
-        var episodes = new List<CtEpisode>();
-        foreach (var prop in apollo.EnumerateObject())
-        {
-            if (!prop.Name.StartsWith("EpisodePreview:", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            var episode = ParseEpisodePreview(prop.Value, showId, showTitle);
-            if (episode is not null)
-            {
-                episodes.Add(episode);
-            }
-        }
-
-        var sortedEpisodes = episodes
-            .OrderBy(e => e.EpisodeIndex ?? int.MaxValue)
-            .ThenBy(e => e.BroadcastDate ?? DateTimeOffset.MaxValue)
-            .ThenBy(e => e.Title, StringComparer.Ordinal)
-            .ToList();
-
-        if (showTitle is null && sortedEpisodes.Count > 0)
-        {
-            showTitle = sortedEpisodes[0].ShowTitle;
-        }
-
-        return new CtShowInfo(showId, showTitle ?? showId, shortDescription, showImageUrl, sortedEpisodes);
-    }
-
-    private CtEpisode? ParseEpisodePreview(JsonElement episodeElement, string showId, string? fallbackShowTitle)
-    {
-        var episodeShowId = GetString(episodeElement, "showId");
-        if (!string.Equals(episodeShowId, showId, StringComparison.Ordinal))
-        {
+            _logger.LogWarning("Show:{ShowId} entity not found while parsing show page", showId);
             return null;
         }
 
-        var id = GetString(episodeElement, "id");
-        if (string.IsNullOrEmpty(id))
-        {
-            return null;
-        }
-
-        var title = GetString(episodeElement, "title") ?? id;
-        var description = GetString(episodeElement, "description");
-        var playable = episodeElement.TryGetProperty("playable", out var playableEl)
-            && playableEl.ValueKind == JsonValueKind.True;
-        var showTitle = GetString(episodeElement, "showTitle") ?? fallbackShowTitle ?? showId;
-
-        int? durationSeconds = null;
-        if (episodeElement.TryGetProperty("duration", out var durationEl) && durationEl.ValueKind == JsonValueKind.Number)
-        {
-            durationSeconds = durationEl.GetInt32();
-        }
+        var title = GetString(showEl, "title") ?? showId;
+        var shortDescription = GetString(showEl, "shortDescription");
+        var idec = GetString(showEl, "idec");
 
         string? imageUrl = null;
-        if (episodeElement.TryGetProperty("images", out var imagesEl))
+        if (showEl.TryGetProperty("images", out var showImages))
         {
-            imageUrl = ExtractBestImageUrl(imagesEl, "card(");
+            imageUrl = ExtractBestImageUrl(showImages, "card(", "poster(");
         }
 
-        DateTimeOffset? broadcastDate = null;
-        if (episodeElement.TryGetProperty("date", out var dateEl)
-            && dateEl.ValueKind == JsonValueKind.Object
-            && dateEl.TryGetProperty("datetime", out var dateTimeEl)
-            && dateTimeEl.ValueKind == JsonValueKind.String
-            && DateTimeOffset.TryParse(dateTimeEl.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedDate))
-        {
-            broadcastDate = parsedDate;
-        }
-
-        var (episodeIndex, episodeCount) = ParseEpisodeIndex(title);
-
-        return new CtEpisode(
-            id,
-            showId,
-            showTitle,
-            title,
-            description,
-            playable,
-            durationSeconds,
-            imageUrl,
-            broadcastDate,
-            episodeIndex,
-            episodeCount);
+        return (title, shortDescription, imageUrl, idec);
     }
 
     private static (int? Index, int? Count) ParseEpisodeIndex(string title)
     {
         var fraction = EpisodeIndexRegex.Match(title);
-        if (fraction.Success)
+        if (!fraction.Success)
         {
-            return (
-                int.Parse(fraction.Groups[1].Value, CultureInfo.InvariantCulture),
-                int.Parse(fraction.Groups[2].Value, CultureInfo.InvariantCulture));
+            return (null, null);
         }
 
-        var single = SingleNumberRegex.Match(title);
-        return single.Success ? (int.Parse(single.Value, CultureInfo.InvariantCulture), (int?)null) : (null, null);
+        return (
+            int.Parse(fraction.Groups[1].Value, CultureInfo.InvariantCulture),
+            int.Parse(fraction.Groups[2].Value, CultureInfo.InvariantCulture));
     }
 
     private static string? GetString(JsonElement element, string propertyName)
@@ -631,7 +911,7 @@ public sealed class CtApiClient : IDisposable
         return best;
     }
 
-    private CtStreamResolveResult? ParseStreamResolve(string json, string episodeId)
+    private CtStreamResolveResult? ParseStreamResolve(string json, string contentId)
     {
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
@@ -639,7 +919,7 @@ public sealed class CtApiClient : IDisposable
         if (!root.TryGetProperty("streams", out var streamsEl) || streamsEl.ValueKind != JsonValueKind.Array
             || streamsEl.GetArrayLength() == 0)
         {
-            _logger.LogInformation("No streams returned for episode '{EpisodeId}'", episodeId);
+            _logger.LogInformation("No streams returned for content id '{ContentId}'", contentId);
             return null;
         }
 
@@ -705,7 +985,7 @@ public sealed class CtApiClient : IDisposable
         }
 
         return new CtStreamResolveResult(
-            episodeId,
+            contentId,
             GetString(root, "title"),
             GetString(root, "episodeTitle"),
             GetString(root, "showTitle"),

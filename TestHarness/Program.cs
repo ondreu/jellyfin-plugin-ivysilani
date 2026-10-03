@@ -240,6 +240,177 @@ if (badPage is not null)
 }
 
 Console.WriteLine();
+Console.WriteLine("=== v1.2 fix #1: MediaSourceInfo.Id musí být Guid-parseable ===");
+
+var sampleContentId = "219381482650009";
+var guid1 = CtApiClient.ToMediaSourceGuid(sampleContentId).ToString("N");
+var guid2 = CtApiClient.ToMediaSourceGuid(sampleContentId).ToString("N");
+var reparsed = Guid.TryParse(guid1, out _);
+Console.WriteLine($"ToMediaSourceGuid(\"{sampleContentId}\") => {guid1}");
+Console.WriteLine($"  Guid.TryParse OK: {reparsed}");
+Console.WriteLine($"  Deterministický (stejný vstup => stejný výstup): {guid1 == guid2}");
+if (!reparsed || guid1 != guid2)
+{
+    Console.WriteLine("  CHYBA: výsledek není platný/stabilní Guid string.");
+    failures++;
+}
+
+Console.WriteLine();
+Console.WriteLine("=== v1.2 fix #2: kategorie musí vrátit SKUTEČNÝ celkový počet, ne jen první dávku ===");
+
+const string seriesCategoryId = "3976"; // Seriály - known from v1.1 harness run to have 246+ shows
+var fullSeries = await client.GetFullCategoryAsync(seriesCategoryId, TimeSpan.FromHours(3), default).ConfigureAwait(false);
+if (fullSeries is null)
+{
+    Console.WriteLine($"CHYBA: GetFullCategoryAsync({seriesCategoryId}) vrátilo null.");
+    failures++;
+}
+else
+{
+    Console.WriteLine($"Kategorie {seriesCategoryId} (\"Seriály\"): totalCount={fullSeries.TotalCount}, skutečně načteno={fullSeries.Items.Count}");
+    var distinctIds = fullSeries.Items.Select(s => s.ShowId).Distinct(StringComparer.Ordinal).Count();
+    Console.WriteLine($"  Unikátních showId: {distinctIds}");
+
+    if (fullSeries.Items.Count != fullSeries.TotalCount)
+    {
+        Console.WriteLine($"  CHYBA: načteno {fullSeries.Items.Count} položek, ale totalCount={fullSeries.TotalCount} (dřívější bug: oříznuto na 80/první stránku).");
+        failures++;
+    }
+
+    if (fullSeries.TotalCount <= CtApiClient.CatalogPageSize)
+    {
+        Console.WriteLine($"  CHYBA: čekal jsem u \"Seriály\" víc než {CtApiClient.CatalogPageSize} položek (jinak tento test nic neprokazuje).");
+        failures++;
+    }
+
+    if (distinctIds != fullSeries.Items.Count)
+    {
+        Console.WriteLine("  CHYBA: v plném výpisu kategorie jsou duplicitní showId (stránkování se překrývá).");
+        failures++;
+    }
+}
+
+Console.WriteLine();
+Console.WriteLine("=== v1.2 fix #3: Arabela - plný seznam epizod (13), ne jen první dávka (10) ===");
+
+CtCatalogShow? arabela = fullSeries?.Items.FirstOrDefault(s => string.Equals(s.Title, "Arabela", StringComparison.Ordinal));
+if (arabela is null)
+{
+    Console.WriteLine("CHYBA: 'Arabela' nebyla v kategorii Seriály nalezena (API/katalog se mohl změnit).");
+    failures++;
+}
+else
+{
+    Console.WriteLine($"Arabela: id={arabela.ShowId} idec={arabela.Idec} showType={arabela.ShowType}");
+    var arabelaEpisodes = await client.GetEpisodesAsync(arabela.Idec, TimeSpan.FromHours(3), default).ConfigureAwait(false);
+    if (arabelaEpisodes is null)
+    {
+        Console.WriteLine("  CHYBA: GetEpisodesAsync vrátilo null.");
+        failures++;
+    }
+    else
+    {
+        Console.WriteLine($"  Počet epizod: {arabelaEpisodes.Count} (web ukazuje 'N/13' v titulcích)");
+        foreach (var ep in arabelaEpisodes)
+        {
+            Console.WriteLine(
+                $"    idx={(ep.EpisodeIndex?.ToString(CultureInfo.InvariantCulture) ?? "?"),3} "
+                + $"season={ep.SeasonNumber?.ToString(CultureInfo.InvariantCulture) ?? "-"} "
+                + $"id={ep.Id,-16} \"{ep.Title}\"");
+        }
+
+        if (arabelaEpisodes.Count != 13)
+        {
+            Console.WriteLine($"  CHYBA: čekalo se 13 epizod (1/13..13/13), nalezeno {arabelaEpisodes.Count} (dřívější bug: oříznuto na první dávku z __NEXT_DATA__).");
+            failures++;
+        }
+
+        var distinctEpIds = arabelaEpisodes.Select(e => e.Id).Distinct(StringComparer.Ordinal).Count();
+        if (distinctEpIds != arabelaEpisodes.Count)
+        {
+            Console.WriteLine("  CHYBA: duplicitní episode id ve výsledku.");
+            failures++;
+        }
+    }
+}
+
+Console.WriteLine();
+Console.WriteLine("=== v1.2 fix #5 (drobnost): duplicitní názvy epizod napříč řadami se musí odlišit ===");
+
+var babylonShow = fullSeries?.Items.FirstOrDefault(s => s.Title.Contains("Babylon Berl", StringComparison.Ordinal));
+if (babylonShow is null)
+{
+    Console.WriteLine("Babylon Berlín nebyl v kategorii Seriály nalezen - test přeskočen (není chyba, jen není v aktuálním katalogu na stejném místě).");
+}
+else
+{
+    var babylonEpisodes = await client.GetEpisodesAsync(babylonShow.Idec, TimeSpan.FromHours(3), default).ConfigureAwait(false);
+    if (babylonEpisodes is null)
+    {
+        Console.WriteLine("  CHYBA: GetEpisodesAsync(Babylon Berlín) vrátilo null.");
+        failures++;
+    }
+    else
+    {
+        var byTitle = babylonEpisodes.GroupBy(e => e.Title, StringComparer.Ordinal).Where(g => g.Count() > 1).ToList();
+        Console.WriteLine($"  Babylon Berlín: {babylonEpisodes.Count} epizod, duplicitních názvů PO odlišení: {byTitle.Count} (má být 0)");
+        foreach (var ep in babylonEpisodes.Where(e => e.Title.Contains("Epizoda 1/", StringComparison.Ordinal)))
+        {
+            Console.WriteLine($"    id={ep.Id} \"{ep.Title}\" season={ep.SeasonTitle}");
+        }
+
+        if (byTitle.Count > 0)
+        {
+            Console.WriteLine("  CHYBA: po disambiguaci stále existují duplicitní zobrazované názvy epizod.");
+            failures++;
+        }
+    }
+}
+
+Console.WriteLine();
+Console.WriteLine("=== v1.2 fix #4: film z kategorie Filmy musí jít přehrát přímo (ne jako prázdná složka) ===");
+
+const string moviesCategoryId = "3947"; // Filmy
+var fullMovies = await client.GetFullCategoryAsync(moviesCategoryId, TimeSpan.FromHours(3), default).ConfigureAwait(false);
+if (fullMovies is null)
+{
+    Console.WriteLine($"CHYBA: GetFullCategoryAsync({moviesCategoryId}) vrátilo null.");
+    failures++;
+}
+else
+{
+    var movie = fullMovies.Items.FirstOrDefault(s => string.Equals(s.ShowType, "movie", StringComparison.OrdinalIgnoreCase) && s.Playable);
+    if (movie is null)
+    {
+        Console.WriteLine("  CHYBA: v kategorii Filmy nebyl nalezen žádný showType=='movie' záznam.");
+        failures++;
+    }
+    else
+    {
+        Console.WriteLine($"  Film: \"{movie.Title}\" id={movie.ShowId} idec={movie.Idec} duration={movie.DurationSeconds}s");
+        var movieResolved = await client.ResolveStreamAsync(movie.Idec, default).ConfigureAwait(false);
+        if (movieResolved is null)
+        {
+            Console.WriteLine("  CHYBA: ResolveStreamAsync(film.idec) vrátilo null - film by se v katalogu zobrazil jako nehratelný/prázdný.");
+            failures++;
+        }
+        else
+        {
+            Console.WriteLine($"  Resolve OK: isPlayable={movieResolved.Playability?.IsPlayable}, duration={movieResolved.DurationSeconds}s");
+            Console.WriteLine($"  HLS master URL (prvních 120 znaků): {Truncate(movieResolved.HlsUrl, 120)}");
+            if (movieResolved.Playability is { IsPlayable: false })
+            {
+                Console.WriteLine("  CHYBA: film vybraný jako isPlayable=true v katalogu, ale resolve říká, že není hratelný.");
+                failures++;
+            }
+        }
+
+        var mediaSourceId = CtApiClient.ToMediaSourceGuid(movie.Idec).ToString("N");
+        Console.WriteLine($"  MediaSourceInfo.Id, který by šel do GetChannelItemMediaInfo: {mediaSourceId} (Guid-parseable: {Guid.TryParse(mediaSourceId, out _)})");
+    }
+}
+
+Console.WriteLine();
 Console.WriteLine("=== Shrnutí ===");
 Console.WriteLine(failures == 0 ? "VŠECHNY TESTY PROŠLY (0 chyb)." : $"NALEZENO {failures} CHYB.");
 

@@ -1,25 +1,33 @@
 ---
 name: "iVysílání"
 guid: "50151328-7f55-42fe-b7d2-a789212ef6fc"
-version: "1.1.0.0"
+version: "1.2.0.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Celý katalog ČT iVysílání (podle kategorií) + oblíbené pořady, streamované přímo z CDN ČT."
 description: >
   Channel plugin, který v Jellyfin knihovně zobrazí celý katalog iVysílání
-  (ceskatelevize.cz) podle kategorií (Seriály, Filmy, Dokumenty, ...), lazy a
-  stránkovaně, plus uživatelský seznam oblíbených pořadů ("Oblíbené"), a
-  přehrává je přímo ze serverů ČT přes HLS. Žádné stahování médií na server;
-  obsah mizí z knihovny, jakmile ho ČT odstraní.
+  (ceskatelevize.cz) podle kategorií (Seriály, Filmy, Dokumenty, ...), plus
+  uživatelský seznam oblíbených pořadů ("Oblíbené"), a přehrává je přímo ze
+  serverů ČT přes HLS. Žádné stahování médií na server; obsah mizí z
+  knihovny, jakmile ho ČT odstraní.
 category: "Live TV"
 owner: "ivysilani-plugin"
 artifacts:
   - "Jellyfin.Plugin.Ivysilani.dll"
 changelog: >
-  1.1.0: kořen channelu nově nabízí celý katalog iVysílání podle kategorií
-  (lazy, stránkovaně přes GraphQL category.programmeFind), nejen uživatelský
-  seznam URL (ten zůstal jako složka "Oblíbené"); odolnost proti 403/429/5xx
-  (retry s backoffem, limit 2 souběžné požadavky).
+  1.2.0: oprava přehrávání - MediaSourceInfo.Id musí být Guid, jinak Jellyfin
+  shazovalo /videos/.../master.m3u8 (FormatException); oprava kategorií
+  oříznutých na 80 pořadů (GetChannelItems se volá jen jednou bez stránkování
+  a Jellyfin si paging řeší sám nad celým výsledkem, takže kategorie se teď
+  stahuje celá, ne po stránkách); oprava seriálů oříznutých na první dávku
+  epizod (nahrazeno GraphQL episodesPreviewFind s reálnou paginací); filmy z
+  katalogu jsou nyní přímo přehratelné položky (ChannelMediaContentType.Movie),
+  ne prázdné složky; rozlišení duplicitních názvů epizod napříč řadami
+  (Babylon Berlín apod.).
+  1.1.0: kořen channelu nově nabízí celý katalog iVysílání podle kategorií,
+  nejen uživatelský seznam URL (ten zůstal jako složka "Oblíbené"); odolnost
+  proti 403/429/5xx (retry s backoffem).
   1.0.0: první verze - konfigurovatelný seznam pořadů z iVysílání, streamování
   přímo z CDN ČT, cache stránek/streamů s TTL, automatické mizení položek bez
   dostupného streamu.

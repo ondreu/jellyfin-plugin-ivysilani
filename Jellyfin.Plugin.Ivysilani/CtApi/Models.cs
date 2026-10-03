@@ -4,7 +4,8 @@ using System.Collections.Generic;
 namespace Jellyfin.Plugin.Ivysilani.CtApi;
 
 /// <summary>
-/// A pořad (show) resolved from a ceskatelevize.cz "/porady/{id}-..." page, with its episode list.
+/// A pořad (show) resolved from a ceskatelevize.cz "/porady/{id}-..." page, with its full
+/// (fully paginated) episode list.
 /// </summary>
 public sealed record CtShowInfo(
     string ShowId,
@@ -14,7 +15,7 @@ public sealed record CtShowInfo(
     IReadOnlyList<CtEpisode> Episodes);
 
 /// <summary>
-/// One episode of a show, as listed on the show's page (before stream resolution).
+/// One episode of a show, as returned by the episodesPreviewFind GraphQL query.
 /// </summary>
 public sealed record CtEpisode(
     string Id,
@@ -27,7 +28,9 @@ public sealed record CtEpisode(
     string? ImageUrl,
     DateTimeOffset? BroadcastDate,
     int? EpisodeIndex,
-    int? EpisodeCount);
+    int? EpisodeCount,
+    string? SeasonTitle,
+    int? SeasonNumber);
 
 /// <summary>
 /// The playable interval reported by the stream-data resolve endpoint.
@@ -40,7 +43,8 @@ public sealed record CtPlayability(bool IsPlayable, DateTimeOffset? PlayableFrom
 public sealed record CtSubtitle(string Language, string Url);
 
 /// <summary>
-/// The result of resolving an episode's playable HLS stream via the ČT stream-data API.
+/// The result of resolving an episode's (or movie's) playable HLS stream via the ČT
+/// stream-data API.
 /// </summary>
 public sealed record CtStreamResolveResult(
     string ExternalId,
@@ -60,9 +64,11 @@ public sealed record CtStreamResolveResult(
 public sealed record CtCategory(string CategoryId, string Slug, string Title);
 
 /// <summary>
-/// One show as listed in a catalog category page (full catalog, not the curated list the user
-/// configures by hand). <see cref="Slug"/> already contains the show id prefix
-/// (e.g. "12745900949-docent") and is enough to build the show's page URL directly.
+/// One show (or movie) as listed in a catalog category page (full catalog, not the curated
+/// list the user configures by hand). <see cref="Slug"/> already contains the show id prefix
+/// (e.g. "12745900949-docent"). <see cref="Idec"/> is a playable content id belonging to this
+/// show - for a movie it resolves the movie itself directly; for a series it seeds the full
+/// episode lookup (<c>episodesPreviewFind</c>).
 /// </summary>
 public sealed record CtCatalogShow(
     string ShowId,
@@ -70,10 +76,13 @@ public sealed record CtCatalogShow(
     string Title,
     string? ShortDescription,
     bool Playable,
-    string? ImageUrl);
+    string? ImageUrl,
+    string ShowType,
+    string Idec,
+    int? DurationSeconds);
 
 /// <summary>
-/// One page of a category's show listing (GraphQL <c>category.programmeFind</c>), with the
-/// total count across all pages so the caller can expose it to Jellyfin's channel paging.
+/// One page (or, once fully paginated, the complete set) of a category's show listing
+/// (GraphQL <c>category.programmeFind</c>), with the total count reported by the API.
 /// </summary>
 public sealed record CtCatalogPage(int TotalCount, IReadOnlyList<CtCatalogShow> Items);

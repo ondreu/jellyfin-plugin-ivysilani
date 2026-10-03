@@ -1,5 +1,5 @@
 === iVysílání plugin — test harness proti reálnému ČT API ===
-Spuštěno: 2026-10-03 19:54:05 +02:00
+Spuštěno: 2026-10-03 20:44:04 +02:00
 
 --- Vstupní URL: https://www.ceskatelevize.cz/porady/16208367858-na-telo/224512120130001
     ParseShowId => 16208367858
@@ -36,7 +36,7 @@ Spuštěno: 2026-10-03 19:54:05 +02:00
     playableTo:    
     previewImage:  https://ctfs.ceskatelevize.cz/porady-s3/episode/66602233ca665c5f500e72d4/card/epizoda-1-9.ef33f.jpeg
     subtitles:     1 track(s) (lang=ces)
-    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=b77a1b1d368676958c8a1924f78a9ebba3cb54b2&userId=0bc23ce4-6b6c-4909-8302-e317ee549c99&contentI…
+    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=fe95924ddbc642a0dddfb55f28cc5217e0ef119e&userId=799eb2e9-1dc5-4281-be5c-ac8fa9581c27&contentI…
     Playlist fetch: OK, 6502 bajtů, #EXTM3U header = True
 
 --- Resolve episodeId=224512120130002 ("Epizoda 2/9")
@@ -49,7 +49,7 @@ Spuštěno: 2026-10-03 19:54:05 +02:00
     playableTo:    
     previewImage:  https://ctfs.ceskatelevize.cz/porady-s3/episode/666034801041b402c00f09b2/card/epizoda-2-9.3928e.jpeg
     subtitles:     1 track(s) (lang=ces)
-    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=f8b30ff8f420963916dacdafeef23e88bbdf209d&userId=b8bb1570-045c-4e9e-ba4b-0a8e004cc94c&contentI…
+    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=1d984df854a7f28651267218d571162a0c4c5c03&userId=1e8ac202-6db5-440d-9b59-1008551ffcd1&contentI…
     Playlist fetch: OK, 2019 bajtů, #EXTM3U header = True
 
 --- Resolve episodeId=224512120130003 ("Epizoda 3/9")
@@ -62,7 +62,7 @@ Spuštěno: 2026-10-03 19:54:05 +02:00
     playableTo:    
     previewImage:  https://ctfs.ceskatelevize.cz/porady-s3/episode/666043808ebfdd0cc90a85a2/card/epizoda-3-9.ea00d.jpeg
     subtitles:     1 track(s) (lang=ces)
-    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=f6364c955a3616f639a1140f22a869e9112d6f71&userId=4ff612b4-3e53-4d01-b28b-840a2c31a038&contentI…
+    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=581628c37e06dc1504868d9be2f6b9a43eb82d79&userId=2d8a9bde-97b2-40de-a957-87520c6c4877&contentI…
     Playlist fetch: OK, 2019 bajtů, #EXTM3U header = True
 
 --- Resolve episodeId=224512120130004 ("Epizoda 4/9")
@@ -75,7 +75,7 @@ Spuštěno: 2026-10-03 19:54:05 +02:00
     playableTo:    
     previewImage:  https://ctfs.ceskatelevize.cz/porady-s3/episode/666049238ebfdd0cc90a85a3/card/epizoda-4-9.73da8.jpeg
     subtitles:     1 track(s) (lang=ces)
-    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=3ccf22cdf07df54f961f5322f7fbcd4bf063d1c4&userId=0ebb1438-b4ef-44ae-abd8-f7d79a10c93e&contentI…
+    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=f93d8381dda336552804517b508d4bf77c5124f6&userId=d07764a3-2e2f-4300-87e9-7e65eec75254&contentI…
     Playlist fetch: OK, 2019 bajtů, #EXTM3U header = True
 
 --- Resolve episodeId=224512120130005 ("Epizoda 5/9")
@@ -88,7 +88,7 @@ Spuštěno: 2026-10-03 19:54:05 +02:00
     playableTo:    
     previewImage:  https://ctfs.ceskatelevize.cz/porady-s3/episode/666053e8fd0e9262b50ae369/card/epizoda-5-9.4551e.jpeg
     subtitles:     1 track(s) (lang=ces)
-    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=161e71fb6a126c81cffb47f2b26e3a029ab36fc2&userId=41697c3e-f0ec-4b53-b0fb-565f54fcfceb&contentI…
+    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=f02797359aa5b3ba5c5df590113df41cc3a9607d&userId=c913966a-dbf2-4b85-a1a1-84deb18afa97&contentI…
     Playlist fetch: OK, 2019 bajtů, #EXTM3U header = True
 
 === Katalog: top-level kategorie (nový kořen channelu v1.1) ===
@@ -129,6 +129,47 @@ Kategorie 4003 ("Dokumenty"): totalCount=2643
 === Katalog: neexistující categoryId se má ztratit potichu (graceful), ne spadnout ===
 GetCategoryShowsAsync("999999999") => null (OK, očekáváno)
 
+=== v1.2 fix #1: MediaSourceInfo.Id musí být Guid-parseable ===
+20:44:07 info: Jellyfin.Plugin.Ivysilani.CtApi.CtApiClient[0] GraphQL error for category '999999999': Obsah stránky nebyl nalezen.
+ToMediaSourceGuid("219381482650009") => 55f9f4a54cffa937610e5b184d7ace56
+  Guid.TryParse OK: True
+  Deterministický (stejný vstup => stejný výstup): True
+
+=== v1.2 fix #2: kategorie musí vrátit SKUTEČNÝ celkový počet, ne jen první dávku ===
+20:44:07 info: Jellyfin.Plugin.Ivysilani.CtApi.CtApiClient[0] Category '3976' has 246 shows, fetching 3 more page(s).
+Kategorie 3976 ("Seriály"): totalCount=246, skutečně načteno=246
+  Unikátních showId: 246
+
+=== v1.2 fix #3: Arabela - plný seznam epizod (13), ne jen první dávka (10) ===
+Arabela: id=898281 idec=280350950200013 showType=series
+  Počet epizod: 13 (web ukazuje 'N/13' v titulcích)
+    idx=  1 season=- id=280350950200001  "1/13 Jak pan Majer našel zvoneček"
+    idx=  2 season=- id=280350950200002  "2/13 Rumburakova pomsta"
+    idx=  3 season=- id=280350950200003  "3/13 Petr a princezna"
+    idx=  4 season=- id=280350950200004  "4/13 Jezevčík Karel Majer"
+    idx=  5 season=- id=280350950200005  "5/13 Arabela na útěku"
+    idx=  6 season=- id=280350950200006  "6/13 Petrovo zmizení"
+    idx=  7 season=- id=280350950200007  "7/13 Pohádky jdou do sběru"
+    idx=  8 season=- id=280350950200008  "8/13 Jeníček a Mařenka"
+    idx=  9 season=- id=280350950200009  "9/13 Civilizace si žádá své"
+    idx= 10 season=- id=280350950200010  "10/13 Rumburakova velká šance"
+    idx= 11 season=- id=280350950200011  "11/13 Příliš mnoho generálů"
+    idx= 12 season=- id=280350950200012  "12/13 Hrdlička zasahuje"
+    idx= 13 season=- id=280350950200013  "13/13 Zvonečkem to začalo, zvonečkem to končí"
+
+=== v1.2 fix #5 (drobnost): duplicitní názvy epizod napříč řadami se musí odlišit ===
+  Babylon Berlín: 40 epizod, duplicitních názvů PO odlišení: 0 (má být 0)
+    id=219381482650001 "Epizoda 1/8 (I. řada)" season=I. řada
+    id=219381482650009 "Epizoda 1/8 (II. řada)" season=II. řada
+    id=220381485620001 "Epizoda 1/12 (III. řada)" season=III. řada
+    id=221381486380001 "Epizoda 1/12 (IV. řada)" season=IV. řada
+
+=== v1.2 fix #4: film z kategorie Filmy musí jít přehrát přímo (ne jako prázdná složka) ===
+20:44:07 info: Jellyfin.Plugin.Ivysilani.CtApi.CtApiClient[0] Category '3947' has 899 shows, fetching 11 more page(s).
+  Film: "Za borovicovým hájem" id=17306949986 idec=22538149365 duration=8076s
+  Resolve OK: isPlayable=True, duration=8075.16s
+  HLS master URL (prvních 120 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=354ecd3aa80e09df7d2d2a8c2cd2f972021f7b87&userId=523cdef8-0bda-4f7c-9d1f-4…
+  MediaSourceInfo.Id, který by šel do GetChannelItemMediaInfo: 8ed293ad75511711008b10e744007804 (Guid-parseable: True)
+
 === Shrnutí ===
 VŠECHNY TESTY PROŠLY (0 chyb).
-19:54:07 info: Jellyfin.Plugin.Ivysilani.CtApi.CtApiClient[0] GraphQL error for category '999999999': Obsah stránky nebyl nalezen.
