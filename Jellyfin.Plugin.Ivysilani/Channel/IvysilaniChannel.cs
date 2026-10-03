@@ -38,6 +38,15 @@ public sealed class IvysilaniChannel : IChannel, IRequiresMediaInfoCallback
     private const string FavoriteShowFolderPrefix = "fav:";
     private const string CatalogShowFolderPrefix = "show:";
 
+    // Jellyfin's server-side episode listing (GET /Shows/{id}/Episodes) only walks a series
+    // through its SEASON children (Series.GetEpisodes -> allItems.OfType<Season>().SelectMany),
+    // so a series folder with episodes attached directly always yields an empty list. The
+    // clients (web AND the Android app share the same playbackmanager code) build the play
+    // queue from that endpoint, get [] and abort with "Unable to find a valid media source"
+    // BEFORE ever calling PlaybackInfo. We therefore expose a season layer:
+    // show folder -> "{showFolderId}#s{seasonNumber}" -> episodes.
+    private const string SeasonFolderMarker = "#s";
+
     private readonly CtApiClient _ctApiClient;
     private readonly ILogger<IvysilaniChannel> _logger;
 
@@ -59,7 +68,7 @@ public sealed class IvysilaniChannel : IChannel, IRequiresMediaInfoCallback
     public string Description => "Celý katalog iVysílání (ceskatelevize.cz) podle kategorií, streamovaný přímo ze serverů ČT.";
 
     /// <inheritdoc />
-    public string DataVersion => "2";
+    public string DataVersion => "3";
 
     /// <inheritdoc />
     public string HomePageUrl => "https://www.ceskatelevize.cz/ivysilani/";
@@ -119,7 +128,8 @@ public sealed class IvysilaniChannel : IChannel, IRequiresMediaInfoCallback
 
         if (folderId.StartsWith(FavoriteShowFolderPrefix, StringComparison.Ordinal))
         {
-            var showId = folderId[FavoriteShowFolderPrefix.Length..];
+            var (baseFolderId, season) = SplitSeasonFolderId(folderId);
+            var showId = baseFolderId[FavoriteShowFolderPrefix.Length..];
             var showUrls = ParseConfiguredShowUrls(config.ShowUrls);
             var sourceUrl = showUrls.FirstOrDefault(
                 u => string.Equals(CtApiClient.ParseShowId(u), showId, StringComparison.Ordinal));
@@ -130,14 +140,26 @@ public sealed class IvysilaniChannel : IChannel, IRequiresMediaInfoCallback
             }
 
             var show = await _ctApiClient.GetShowAsync(sourceUrl, ttl, cancellationToken).ConfigureAwait(false);
-            return BuildEpisodesResult(show?.Episodes ?? Array.Empty<CtEpisode>());
+            var episodes = show?.Episodes ?? Array.Empty<CtEpisode>();
+            return season.HasValue
+                ? BuildEpisodesResult(episodes.Where(e => SeasonKey(e) == season.Value).ToList())
+                : BuildSeasonFoldersResult(episodes, baseFolderId);
         }
 
         if (folderId.StartsWith(CatalogShowFolderPrefix, StringComparison.Ordinal))
         {
-            var seedIdec = folderId[CatalogShowFolderPrefix.Length..];
-            var episodes = await _ctApiClient.GetEpisodesAsync(seedIdec, ttl, cancellationToken).ConfigureAwait(false);
-            return BuildEpisodesResult(episodes ?? Array.Empty<CtEpisode>());
+            var (baseFolderId, season) = SplitSeasonFolderId(folderId);
+            var seedIdec = baseFolderId[CatalogShowFolderPrefix.Length..];
+            var episodes = await _ctApiClient.GetEpisodesAsync(seedIdec, ttl, cancellationToken).ConfigureAwait(false)
+                ?? Array.Empty<CtEpisode>();
+            var result = season.HasValue
+                ? BuildEpisodesResult(episodes.Where(e => SeasonKey(e) == season.Value).ToList())
+                : BuildSeasonFoldersResult(episodes, baseFolderId);
+            _logger.LogInformation(
+                "SeasonQuery folderId='{FolderId}' base='{Base}' seed='{Seed}' season={Season} totalEpisodes={Total} returned={Returned} seasonKeys=[{Keys}]",
+                folderId, baseFolderId, seedIdec, season, episodes.Count, result.Items.Count,
+                string.Join(",", episodes.GroupBy(SeasonKey).Select(g => g.Key + ":" + g.Count())));
+            return result;
         }
 
         _logger.LogWarning("Unrecognized channel folder id '{FolderId}'.", folderId);
@@ -194,20 +216,15 @@ public sealed class IvysilaniChannel : IChannel, IRequiresMediaInfoCallback
             new() { Type = MediaStreamType.Audio, Index = 1, Codec = "aac", Language = "cze", IsDefault = true }
         };
 
-        var subtitleIndex = 2;
-        foreach (var subtitle in resolved.Subtitles)
-        {
-            streams.Add(new MediaStream
-            {
-                Type = MediaStreamType.Subtitle,
-                Index = subtitleIndex++,
-                Codec = "vtt",
-                Language = subtitle.Language,
-                IsExternal = true,
-                DeliveryMethod = SubtitleDeliveryMethod.External,
-                DeliveryUrl = subtitle.Url
-            });
-        }
+        // Titulky NEPODÁVÁME, přestože je ČT nabízí — důvod (ověřeno na reálném serveru):
+        // jakmile je ve zdroji titulková stopa, StreamBuilder zvolí SubtitleMethod=Encode
+        // a předá klientovi URL tvaru "/videos/{id}/stream.hls". Jellyfin 12.1 u téhle
+        // cesty sestaví ffmpeg příkaz s výstupem "….hls" BEZ "-f hls" → ffmpeg skončí
+        // ("Unable to choose an output format … use a standard extension", exit 234) →
+        // HTTP 500 → klient hlásí „Nelze najít platný zdroj médií k přehrání".
+        // Bez titulkové stopy zvolí DirectPlay (TranscodeReason=0) a klient přehrává
+        // přímo z CDN ČT — CDN vrací Access-Control-Allow-Origin: *, takže to funguje
+        // i z prohlížeče. Do vyřešení upstream cesty tedy titulky z MediaSource vynecháváme.
 
         mediaSource.MediaStreams = streams;
 
@@ -368,7 +385,58 @@ public sealed class IvysilaniChannel : IChannel, IRequiresMediaInfoCallback
     }
 
     /// <summary>
-    /// Maps a show's full episode list to channel media items (shared by "Oblíbené" shows and
+    /// Splits a season folder id ("{showFolderId}#s{season}") into the owning show folder id and
+    /// the season number. Non-season ids pass through unchanged with a null season.
+    /// </summary>
+    private static (string BaseFolderId, int? Season) SplitSeasonFolderId(string folderId)
+    {
+        var idx = folderId.LastIndexOf(SeasonFolderMarker, StringComparison.Ordinal);
+        if (idx < 0)
+        {
+            return (folderId, null);
+        }
+
+        var rawSeason = folderId[(idx + SeasonFolderMarker.Length)..];
+        return int.TryParse(rawSeason, out var season)
+            ? (folderId[..idx], season)
+            : (folderId, null);
+    }
+
+    private static int SeasonKey(CtEpisode episode) => episode.SeasonNumber ?? 0;
+
+    /// <summary>
+    /// The season layer of a show folder. Required by the server: GET /Shows/{id}/Episodes only
+    /// enumerates episodes through Season children of the series, and both the web UI and the
+    /// Android app build their playback queue from that endpoint — without seasons it returns
+    /// an empty list and clients abort playback before ever reaching PlaybackInfo.
+    /// </summary>
+    private static ChannelItemResult BuildSeasonFoldersResult(IEnumerable<CtEpisode> episodes, string showFolderId)
+    {
+        var groups = episodes
+            .Where(e => e.Playable)
+            .GroupBy(SeasonKey)
+            .OrderBy(g => g.Key)
+            .ToList();
+
+        var items = groups.Select(g => new ChannelItemInfo
+        {
+            Id = showFolderId + SeasonFolderMarker + g.Key,
+            // Single all-null group = a show CT gives no season info for: call it Episodes.
+            Name = g.Key >= 1 ? "Season " + g.Key : (groups.Count == 1 ? "Episodes" : "Specials"),
+            Type = ChannelItemType.Folder,
+            FolderType = ChannelFolderType.Season,
+            // Season.GetEpisodes matches episodes on ParentIndexNumber == season IndexNumber
+            // (fallback: parent linkage), so the season number must travel with the folder.
+            IndexNumber = g.Key,
+            Overview = g.Count() + " epizod",
+            ImageUrl = g.Select(e => e.ImageUrl).FirstOrDefault(u => !string.IsNullOrEmpty(u))
+        }).ToList<ChannelItemInfo>();
+
+        return new ChannelItemResult { Items = items, TotalRecordCount = items.Count };
+    }
+
+    /// <summary>
+    /// Maps a show's full episode list to channel media items (shared for "Oblíbené" shows and
     /// catalog shows - both resolve to a plain <see cref="CtEpisode"/> list by this point).
     /// </summary>
     private static ChannelItemResult BuildEpisodesResult(IReadOnlyList<CtEpisode> episodes)
