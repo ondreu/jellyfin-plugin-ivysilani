@@ -1,14 +1,14 @@
 {
   "category": "Live TV",
-  "changelog": "1.0.0: první verze - konfigurovatelný seznam pořadů z iVysílání, streamování přímo z CDN ČT.",
-  "description": "Channel plugin, který v Jellyfin knihovně zobrazí vybrané pořady a filmy z iVysílání (ceskatelevize.cz) a přehrává je přímo ze serverů ČT přes HLS. Žádné stahování médií na server.",
+  "changelog": "1.1.0: celý katalog iVysílání jako strom kategorií (lazy, stránkovaný); 'Oblíbené' = původní seznam URL. 1.0.0: první verze - konfigurovatelný seznam pořadů z iVysílání, streamování přímo z CDN ČT.",
+  "description": "Channel plugin, který v Jellyfin knihovně zobrazí celý katalog iVysílání (ceskatelevize.cz) podle kategorií, plus uživatelský seznam oblíbených pořadů, a přehrává je přímo ze serverů ČT přes HLS. Žádné stahování médií na server.",
   "guid": "50151328-7f55-42fe-b7d2-a789212ef6fc",
   "name": "iVysílání",
-  "overview": "Vybrané pořady z ČT iVysílání jako knihovna, streamované přímo z CDN ČT.",
+  "overview": "Celý katalog ČT iVysílání (podle kategorií) + oblíbené pořady, streamované přímo z CDN ČT.",
   "owner": "ivysilani-plugin",
   "targetAbi": "12.1.0.0",
   "timestamp": "2026-10-03T00:00:00.000Z",
-  "version": "1.0.0.0",
+  "version": "1.1.0.0",
   "status": "Active",
   "autoUpdate": false,
   "assemblies": []

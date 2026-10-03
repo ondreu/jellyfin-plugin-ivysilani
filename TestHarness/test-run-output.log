@@ -1,5 +1,5 @@
 === iVysílání plugin — test harness proti reálnému ČT API ===
-Spuštěno: 2026-10-03 19:14:14 +02:00
+Spuštěno: 2026-10-03 19:54:05 +02:00
 
 --- Vstupní URL: https://www.ceskatelevize.cz/porady/16208367858-na-telo/224512120130001
     ParseShowId => 16208367858
@@ -36,7 +36,7 @@ Spuštěno: 2026-10-03 19:14:14 +02:00
     playableTo:    
     previewImage:  https://ctfs.ceskatelevize.cz/porady-s3/episode/66602233ca665c5f500e72d4/card/epizoda-1-9.ef33f.jpeg
     subtitles:     1 track(s) (lang=ces)
-    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=aaf635f43dbf57f5b1898d507ef95f1cd1c2f69e&userId=e3e5778d-4ec9-475b-b20f-d7013ff07da1&contentI…
+    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=b77a1b1d368676958c8a1924f78a9ebba3cb54b2&userId=0bc23ce4-6b6c-4909-8302-e317ee549c99&contentI…
     Playlist fetch: OK, 6502 bajtů, #EXTM3U header = True
 
 --- Resolve episodeId=224512120130002 ("Epizoda 2/9")
@@ -49,7 +49,7 @@ Spuštěno: 2026-10-03 19:14:14 +02:00
     playableTo:    
     previewImage:  https://ctfs.ceskatelevize.cz/porady-s3/episode/666034801041b402c00f09b2/card/epizoda-2-9.3928e.jpeg
     subtitles:     1 track(s) (lang=ces)
-    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=6f20db2a4062607cf10fa500d273869bdcd8f96a&userId=951bd874-b280-4ca4-a6cf-d71d1eafdb59&contentI…
+    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=f8b30ff8f420963916dacdafeef23e88bbdf209d&userId=b8bb1570-045c-4e9e-ba4b-0a8e004cc94c&contentI…
     Playlist fetch: OK, 2019 bajtů, #EXTM3U header = True
 
 --- Resolve episodeId=224512120130003 ("Epizoda 3/9")
@@ -62,7 +62,7 @@ Spuštěno: 2026-10-03 19:14:14 +02:00
     playableTo:    
     previewImage:  https://ctfs.ceskatelevize.cz/porady-s3/episode/666043808ebfdd0cc90a85a2/card/epizoda-3-9.ea00d.jpeg
     subtitles:     1 track(s) (lang=ces)
-    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=b10e3e44e4e306f6f2403460ad908d41303b921e&userId=c00bae5a-dc50-45f5-8f45-c72d3439afa2&contentI…
+    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=f6364c955a3616f639a1140f22a869e9112d6f71&userId=4ff612b4-3e53-4d01-b28b-840a2c31a038&contentI…
     Playlist fetch: OK, 2019 bajtů, #EXTM3U header = True
 
 --- Resolve episodeId=224512120130004 ("Epizoda 4/9")
@@ -75,7 +75,7 @@ Spuštěno: 2026-10-03 19:14:14 +02:00
     playableTo:    
     previewImage:  https://ctfs.ceskatelevize.cz/porady-s3/episode/666049238ebfdd0cc90a85a3/card/epizoda-4-9.73da8.jpeg
     subtitles:     1 track(s) (lang=ces)
-    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=37f9f5452c58ec770eda492ea04265a915d9cf61&userId=5da9431f-2107-4833-aaf8-8f6f14e32bca&contentI…
+    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=3ccf22cdf07df54f961f5322f7fbcd4bf063d1c4&userId=0ebb1438-b4ef-44ae-abd8-f7d79a10c93e&contentI…
     Playlist fetch: OK, 2019 bajtů, #EXTM3U header = True
 
 --- Resolve episodeId=224512120130005 ("Epizoda 5/9")
@@ -88,8 +88,47 @@ Spuštěno: 2026-10-03 19:14:14 +02:00
     playableTo:    
     previewImage:  https://ctfs.ceskatelevize.cz/porady-s3/episode/666053e8fd0e9262b50ae369/card/epizoda-5-9.4551e.jpeg
     subtitles:     1 track(s) (lang=ces)
-    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=57d1f1c5b7077ada19744fdff66b903b02e32a7f&userId=75e04005-4ba0-4d4f-a7fa-615cec62198b&contentI…
+    HLS master URL (prvních 140 znaků): https://ivys-nw-cdn.o2tv.cz/cdn/uri/get/?token=161e71fb6a126c81cffb47f2b26e3a029ab36fc2&userId=41697c3e-f0ec-4b53-b0fb-565f54fcfceb&contentI…
     Playlist fetch: OK, 2019 bajtů, #EXTM3U header = True
+
+=== Katalog: top-level kategorie (nový kořen channelu v1.1) ===
+Nalezeno 14 kategorií:
+  cat:3976   Seriály              slug=3976-serialy
+  cat:3947   Filmy                slug=3947-filmy
+  cat:4003   Dokumenty            slug=4003-dokumenty
+  cat:4124   Zpravodajství        slug=4124-zpravodajstvi
+  cat:4142   Sport                slug=4142-sport
+  cat:4118   Pro děti             slug=4118-pro-deti
+  cat:4068   Zábava               slug=4068-zabava
+  cat:4079   Historie             slug=4079-historie
+  cat:4029   Kultura              slug=4029-kultura
+  cat:4055   Rady a recepty       slug=4055-rady-a-recepty
+  cat:4106   Příroda              slug=4106-priroda
+  cat:4093   Společnost           slug=4093-spolecnost
+  cat:4191   Spiritualita         slug=4191-spiritualita
+  cat:4732   Archiv               slug=4732-archiv
+
+=== Katalog: stránkovaný výpis pořadů v kategorii (malá kategorie, jedna stránka) ===
+Kategorie 3983: totalCount=68, vráceno=50
+  show:12745900949-docent                            playable=True  "Docent"
+  show:15109660246-komisarka-florence                playable=True  "Komisařka Florence"
+  show:10354229723-pripady-1-oddeleni                playable=True  "Případy 1. oddělení"
+  show:17054374070-ve-vykonu-sluzby                  playable=True  "Ve výkonu služby"
+  show:13478071605-oktopus                           playable=True  "OKTOPUS"
+  show:15693801551-vysetruje-imma-tataranni          playable=True  "Vyšetřuje Imma Tataranni"
+  show:12549377416-misto-zlocinu-ostrava             playable=True  "Místo zločinu Ostrava"
+  show:899735-maly-pitaval-z-velkeho-mesta           playable=True  "Malý pitaval z velkého města"
+  ...
+
+=== Katalog: stránkování přes offset na velké kategorii (bez duplicit/mezer) ===
+Kategorie 4003 ("Dokumenty"): totalCount=2643
+  Stránka 1 (offset=0,  limit=80): 80 pořadů, první="Legendy kriminalistiky", poslední="Přísně tajné vraždy"
+  Stránka 2 (offset=80, limit=80): 80 pořadů, první="René - vězeň svobody", poslední="Ocelot a já"
+  Překryv mezi stránkami (mělo by být 0): 0
+
+=== Katalog: neexistující categoryId se má ztratit potichu (graceful), ne spadnout ===
+GetCategoryShowsAsync("999999999") => null (OK, očekáváno)
 
 === Shrnutí ===
 VŠECHNY TESTY PROŠLY (0 chyb).
+19:54:07 info: Jellyfin.Plugin.Ivysilani.CtApi.CtApiClient[0] GraphQL error for category '999999999': Obsah stránky nebyl nalezen.

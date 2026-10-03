@@ -8,8 +8,8 @@ připravil soubory v `artifacts/`.
 
 Z `artifacts/` v tomto repozitáři:
 
-- `Jellyfin.Plugin.Ivysilani.dll` (55 296 B, sha256
-  `a5a662f5357b7334a288baef5d7179d82b31bd0fc69f728523a30d284eac39c4`)
+- `Jellyfin.Plugin.Ivysilani.dll` (verze 1.1.0.0, 76 288 B, sha256
+  `bf935e96f24a0afbcd26d66b063859329e5475d39291f826f90ef45bc06b0e9f`)
 - `meta.json`
 
 ## Kam
@@ -49,25 +49,32 @@ na daném kontejneru. Žádný jiný zásah (DB migrace, apod.) není potřeba.
 ## Ověření po restartu
 
 1. **Dashboard → Plugins** → měl by se objevit **iVysílání**, stav *Active*,
-   verze 1.0.0.0. Pokud se objeví jako *Malfunctioned*/*NotSupported*,
+   verze 1.1.0.0. Pokud se objeví jako *Malfunctioned*/*NotSupported*,
    zkontroluj v Jellyfin logu (`/config/log/*.log`) chybovou hlášku — s
    `targetAbi: 12.1.0.0` by to na serveru hlásícím `Version 12.1.0` mělo sedět
    přesně.
-2. **Dashboard → Plugins → iVysílání** (ikona ozubeného kolečka) → otevře se
-   konfigurační stránka s textarea pro seznam URL. Vlož tam alespoň jednu
-   adresu pořadu, např.:
-   ```
-   https://www.ceskatelevize.cz/porady/16208367858-na-telo/224512120130001
-   ```
-   a klikni **Uložit**.
-3. V levém menu Jellyfinu by se měla objevit sekce **Channels** (u některých
+2. V levém menu Jellyfinu by se měla objevit sekce **Channels** (u některých
    verzí webového klienta je skrytá v Dashboardu pod "Channels" nebo se musí
    v nastavení uživatele zapnout zobrazení "Channels" v domovské obrazovce —
    **toto jsem nemohl ověřit naživo, protože nemám přístup k běžícímu
    serveru**, zkontroluj to prosím po restartu a dej mi vědět, pokud se
    nezobrazí).
-4. V channelu "iVysílání" by se měla objevit složka `Na tělo` a v ní 5 dílů.
-   Přehrání by mělo jít přímo (HLS direct play) bez nutnosti transkódování.
+3. Otevři channel "iVysílání" — kořen by měl nabídnout **14 kategorií**
+   (Seriály, Filmy, Dokumenty, ...) + složku **"Oblíbené"** (prázdná, dokud
+   do konfigurace nevložíš vlastní URL). Rozklikni libovolnou kategorii →
+   měl by se zobrazit stránkovaný seznam pořadů dané kategorie (u velkých
+   kategorií, např. Dokumenty, je to přes 2600 pořadů — pokud klient
+   nenačítá další stránky automaticky, je to známé omezení, viz REPORT.md
+   sekce "Omezení v1.1.0"). Rozklikni pořad → měly by se zobrazit jeho díly.
+4. (Volitelně) **Dashboard → Plugins → iVysílání** (ikona ozubeného
+   kolečka) → konfigurační stránka s textarea pro seznam URL do složky
+   "Oblíbené". Vlož tam např.:
+   ```
+   https://www.ceskatelevize.cz/porady/16208367858-na-telo/224512120130001
+   ```
+   a klikni **Uložit** — pořad by se pak objevil ve složce "Oblíbené".
+5. Přehrání dílu (z kategorie i z Oblíbených) by mělo jít přímo (HLS direct
+   play) bez nutnosti transkódování.
 
 ## Odebrání / aktualizace
 

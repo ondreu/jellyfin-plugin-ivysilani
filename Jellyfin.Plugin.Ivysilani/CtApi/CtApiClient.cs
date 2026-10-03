@@ -3,7 +3,10 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -28,6 +31,27 @@ public sealed class CtApiClient : IDisposable
         "https://api.ceskatelevize.cz/video/v1/playlist-vod/v1/stream-data/media/external/{0}"
         + "?canPlayDrm=false&streamType=hls&quality=web&maxQualityCount=5&origin=ivysilani&client=iVysilaniWeb&clientVersion=0.37.6";
 
+    private const string CatalogHomeUrl = "https://www.ceskatelevize.cz/ivysilani/";
+
+    private const string GraphQlUrl = "https://api.ceskatelevize.cz/graphql/";
+
+    // Matches the page's own default page size for category listings (confirmed against the
+    // live site's bundled JS); kept as the default/clamp for our own category paging too.
+    private const int DefaultCatalogPageSize = 80;
+
+    private const int MaxRetryAttempts = 3;
+
+    // The ČT catalog GraphQL query does not expose an "all shows" or "list every category" field;
+    // this is the equivalent of the query the website itself sends for a category's flat show
+    // listing (category.programmeFind), reverse-engineered from the site's own JS bundle - see
+    // REPORT.md "v1.1" for how it was found. Trimmed to just the fields this plugin needs.
+    private const string CategoryShowsQuery =
+        "query IvysilaniCatalog($limit:PaginationAmount!$offset:Int!$categoryId:String!){"
+        + "category(categoryId:$categoryId){"
+        + "programmeFind(limit:$limit offset:$offset){"
+        + "totalCount items{id slug title shortDescription isPlayable images{card(width:480)}}"
+        + "}}}";
+
     private static readonly TimeSpan StreamCacheTtl = TimeSpan.FromMinutes(20);
 
     private static readonly Regex NextDataRegex = new(
@@ -42,10 +66,29 @@ public sealed class CtApiClient : IDisposable
 
     private static readonly Regex ImageWidthRegex = new("\"width\":(\\d+)", RegexOptions.Compiled);
 
+    // Top category nav links look like:
+    // <a ... data-focus-id="nav-Seriály" href="/ivysilani/kategorie/3976-serialy/">Seriály</a>
+    private static readonly Regex CategoryNavRegex = new(
+        "data-focus-id=\"nav-([^\"]+)\" href=\"/ivysilani/kategorie/(\\d+)-([a-z0-9-]+)/\"",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// Default number of shows to return per catalog category page, matching the ČT website's
+    /// own default. Exposed so the channel can advertise it as its preferred page size.
+    /// </summary>
+    public static int CatalogPageSize => DefaultCatalogPageSize;
+
     private readonly HttpClient _httpClient;
     private readonly ILogger<CtApiClient> _logger;
+
+    // Guards against hammering ceskatelevize.cz/api.ceskatelevize.cz if several channel folders
+    // are browsed/refreshed at once - keeps us well below anything that would trip the WAF.
+    private readonly SemaphoreSlim _requestGate = new(2, 2);
+
     private readonly ConcurrentDictionary<string, CacheEntry<CtShowInfo>> _showCache = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, CacheEntry<CtStreamResolveResult>> _streamCache = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, CacheEntry<IReadOnlyList<CtCategory>>> _categoriesCache = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, CacheEntry<CtCatalogPage>> _categoryPageCache = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CtApiClient"/> class.
@@ -155,6 +198,156 @@ public sealed class CtApiClient : IDisposable
         }
     }
 
+    /// <summary>
+    /// Fetches the top-level iVysílání catalog categories (e.g. "Seriály", "Filmy", "Dokumenty")
+    /// as linked from the main catalog navigation. Results are cached in-process for <paramref name="ttl"/>.
+    /// </summary>
+    /// <param name="ttl">How long to keep the parsed result cached.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The top-level categories, or an empty list if they could not be fetched/parsed.</returns>
+    public async Task<IReadOnlyList<CtCategory>> GetTopLevelCategoriesAsync(TimeSpan ttl, CancellationToken cancellationToken)
+    {
+        const string cacheKey = "root";
+        if (_categoriesCache.TryGetValue(cacheKey, out var cached) && cached.ExpiresAtUtc > DateTime.UtcNow)
+        {
+            return cached.Value;
+        }
+
+        try
+        {
+            var html = await FetchStringAsync(CatalogHomeUrl, cancellationToken).ConfigureAwait(false);
+            var seen = new Dictionary<string, CtCategory>(StringComparer.Ordinal);
+            foreach (Match match in CategoryNavRegex.Matches(html))
+            {
+                var title = match.Groups[1].Value;
+                var categoryId = match.Groups[2].Value;
+                var slug = match.Groups[2].Value + "-" + match.Groups[3].Value;
+                seen[categoryId] = new CtCategory(categoryId, slug, title);
+            }
+
+            var categories = seen.Values.ToList();
+            if (categories.Count > 0)
+            {
+                _categoriesCache[cacheKey] = new CacheEntry<IReadOnlyList<CtCategory>>(categories, DateTime.UtcNow.Add(ttl));
+            }
+            else
+            {
+                _logger.LogWarning("No catalog categories found while parsing '{Url}' - page layout may have changed.", CatalogHomeUrl);
+            }
+
+            return categories;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogWarning(ex, "Failed to fetch catalog categories from '{Url}'", CatalogHomeUrl);
+            return Array.Empty<CtCategory>();
+        }
+    }
+
+    /// <summary>
+    /// Fetches one page of a catalog category's full show listing via the public GraphQL API
+    /// (<c>category.programmeFind</c>). Results are cached in-process for <paramref name="ttl"/>.
+    /// </summary>
+    /// <param name="categoryId">The numeric category id (e.g. "3976" for "Seriály").</param>
+    /// <param name="limit">Page size, clamped to <see cref="CatalogPageSize"/>.</param>
+    /// <param name="offset">Zero-based offset into the category's show list.</param>
+    /// <param name="ttl">How long to keep the parsed result cached.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The page, or <c>null</c> if the category doesn't exist or the call failed.</returns>
+    public async Task<CtCatalogPage?> GetCategoryShowsAsync(
+        string categoryId,
+        int limit,
+        int offset,
+        TimeSpan ttl,
+        CancellationToken cancellationToken)
+    {
+        var clampedLimit = Math.Clamp(limit <= 0 ? DefaultCatalogPageSize : limit, 1, DefaultCatalogPageSize);
+        var cacheKey = string.Create(CultureInfo.InvariantCulture, $"{categoryId}:{offset}:{clampedLimit}");
+        if (_categoryPageCache.TryGetValue(cacheKey, out var cached) && cached.ExpiresAtUtc > DateTime.UtcNow)
+        {
+            return cached.Value;
+        }
+
+        var requestBody = JsonSerializer.Serialize(new
+        {
+            operationName = "IvysilaniCatalog",
+            query = CategoryShowsQuery,
+            variables = new { limit = clampedLimit, offset, categoryId }
+        });
+
+        try
+        {
+            var json = await PostJsonAsync(GraphQlUrl, requestBody, cancellationToken).ConfigureAwait(false);
+            var page = ParseCategoryShowsResponse(json, categoryId);
+            if (page is not null)
+            {
+                _categoryPageCache[cacheKey] = new CacheEntry<CtCatalogPage>(page, DateTime.UtcNow.Add(ttl));
+            }
+
+            return page;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            _logger.LogWarning(ex, "Failed to fetch catalog category '{CategoryId}' (offset {Offset})", categoryId, offset);
+            return null;
+        }
+    }
+
+    private CtCatalogPage? ParseCategoryShowsResponse(string json, string categoryId)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        if (root.TryGetProperty("errors", out var errorsEl) && errorsEl.ValueKind == JsonValueKind.Array
+            && errorsEl.GetArrayLength() > 0)
+        {
+            var message = GetString(errorsEl[0], "message");
+            _logger.LogInformation("GraphQL error for category '{CategoryId}': {Message}", categoryId, message);
+            return null;
+        }
+
+        if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object
+            || !data.TryGetProperty("category", out var category) || category.ValueKind != JsonValueKind.Object
+            || !category.TryGetProperty("programmeFind", out var programmeFind))
+        {
+            return null;
+        }
+
+        var totalCount = programmeFind.TryGetProperty("totalCount", out var totalCountEl)
+            && totalCountEl.ValueKind == JsonValueKind.Number
+                ? totalCountEl.GetInt32()
+                : 0;
+
+        var items = new List<CtCatalogShow>();
+        if (programmeFind.TryGetProperty("items", out var itemsEl) && itemsEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in itemsEl.EnumerateArray())
+            {
+                var id = GetString(item, "id");
+                var slug = GetString(item, "slug");
+                var title = GetString(item, "title");
+                if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(slug) || string.IsNullOrEmpty(title))
+                {
+                    continue;
+                }
+
+                var playable = item.TryGetProperty("isPlayable", out var playableEl)
+                    && playableEl.ValueKind == JsonValueKind.True;
+
+                string? imageUrl = null;
+                if (item.TryGetProperty("images", out var imagesEl) && imagesEl.ValueKind == JsonValueKind.Object
+                    && imagesEl.TryGetProperty("card", out var cardEl) && cardEl.ValueKind == JsonValueKind.String)
+                {
+                    imageUrl = cardEl.GetString();
+                }
+
+                items.Add(new CtCatalogShow(id, slug, title, GetString(item, "shortDescription"), playable, imageUrl));
+            }
+        }
+
+        return new CtCatalogPage(totalCount, items);
+    }
+
     private static string NormalizeUrl(string input)
     {
         var trimmed = input.Trim();
@@ -172,12 +365,82 @@ public sealed class CtApiClient : IDisposable
         return trimmed;
     }
 
-    private async Task<string> FetchStringAsync(string url, CancellationToken cancellationToken)
+    private Task<string> FetchStringAsync(string url, CancellationToken cancellationToken)
     {
-        using var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
-            .ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-        return await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        return SendWithRetryAsync(() => new HttpRequestMessage(HttpMethod.Get, url), cancellationToken);
+    }
+
+    private Task<string> PostJsonAsync(string url, string jsonBody, CancellationToken cancellationToken)
+    {
+        return SendWithRetryAsync(
+            () => new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = new StringContent(jsonBody, Encoding.UTF8, "application/json")
+            },
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Sends a request, retrying transient failures (429/403/5xx, timeouts) with backoff, and
+    /// never running more than two of these requests against ceskatelevize.cz concurrently.
+    /// </summary>
+    private async Task<string> SendWithRetryAsync(Func<HttpRequestMessage> requestFactory, CancellationToken cancellationToken)
+    {
+        await _requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            for (var attempt = 1; attempt <= MaxRetryAttempts; attempt++)
+            {
+                using var request = requestFactory();
+                HttpResponseMessage response;
+                try
+                {
+                    response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (HttpRequestException) when (attempt < MaxRetryAttempts)
+                {
+                    await DelayBeforeRetryAsync(attempt, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                using (response)
+                {
+                    if (response.IsSuccessStatusCode)
+                    {
+                        return await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                    }
+
+                    var isTransient = response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests
+                        || (int)response.StatusCode >= 500;
+                    if (!isTransient || attempt == MaxRetryAttempts)
+                    {
+                        response.EnsureSuccessStatusCode();
+                    }
+
+                    _logger.LogWarning(
+                        "Transient HTTP {StatusCode} from ČT (attempt {Attempt}/{MaxAttempts}), retrying.",
+                        (int)response.StatusCode,
+                        attempt,
+                        MaxRetryAttempts);
+                }
+
+                await DelayBeforeRetryAsync(attempt, cancellationToken).ConfigureAwait(false);
+            }
+
+            // Unreachable: the loop above always either returns or throws on its last attempt.
+            throw new HttpRequestException("Exhausted retries without a successful response.");
+        }
+        finally
+        {
+            _requestGate.Release();
+        }
+    }
+
+    private static Task DelayBeforeRetryAsync(int attempt, CancellationToken cancellationToken)
+    {
+        var delay = TimeSpan.FromMilliseconds(500 * Math.Pow(3, attempt - 1));
+        return Task.Delay(delay, cancellationToken);
     }
 
     private CtShowInfo? ParseShowPage(string html, string showId)

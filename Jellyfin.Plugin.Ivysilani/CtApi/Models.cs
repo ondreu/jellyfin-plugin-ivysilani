@@ -52,3 +52,28 @@ public sealed record CtStreamResolveResult(
     string? PreviewImageUrl,
     CtPlayability? Playability,
     IReadOnlyList<CtSubtitle> Subtitles);
+
+/// <summary>
+/// A top-level iVysílání catalog category/genre (e.g. "Seriály", "Filmy"), as linked from the
+/// main catalog navigation ("/ivysilani/kategorie/{categoryId}-{slug}/").
+/// </summary>
+public sealed record CtCategory(string CategoryId, string Slug, string Title);
+
+/// <summary>
+/// One show as listed in a catalog category page (full catalog, not the curated list the user
+/// configures by hand). <see cref="Slug"/> already contains the show id prefix
+/// (e.g. "12745900949-docent") and is enough to build the show's page URL directly.
+/// </summary>
+public sealed record CtCatalogShow(
+    string ShowId,
+    string Slug,
+    string Title,
+    string? ShortDescription,
+    bool Playable,
+    string? ImageUrl);
+
+/// <summary>
+/// One page of a category's show listing (GraphQL <c>category.programmeFind</c>), with the
+/// total count across all pages so the caller can expose it to Jellyfin's channel paging.
+/// </summary>
+public sealed record CtCatalogPage(int TotalCount, IReadOnlyList<CtCatalogShow> Items);

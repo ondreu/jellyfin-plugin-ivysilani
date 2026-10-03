@@ -148,6 +148,98 @@ else
     }
 }
 
+Console.WriteLine("=== Katalog: top-level kategorie (nový kořen channelu v1.1) ===");
+
+var categories = await client.GetTopLevelCategoriesAsync(TimeSpan.FromHours(3), default).ConfigureAwait(false);
+if (categories.Count == 0)
+{
+    Console.WriteLine("CHYBA: GetTopLevelCategoriesAsync nevrátilo žádné kategorie.");
+    failures++;
+}
+else
+{
+    Console.WriteLine($"Nalezeno {categories.Count} kategorií:");
+    foreach (var cat in categories)
+    {
+        Console.WriteLine($"  cat:{cat.CategoryId,-6} {cat.Title,-20} slug={cat.Slug}");
+    }
+}
+
+Console.WriteLine();
+Console.WriteLine("=== Katalog: stránkovaný výpis pořadů v kategorii (malá kategorie, jedna stránka) ===");
+
+const string smallCategoryId = "3983"; // Krimi (sub-genre of Seriály), ~68 shows total
+var smallPage = await client.GetCategoryShowsAsync(smallCategoryId, 50, 0, TimeSpan.FromHours(3), default).ConfigureAwait(false);
+if (smallPage is null)
+{
+    Console.WriteLine($"CHYBA: GetCategoryShowsAsync({smallCategoryId}) vrátilo null.");
+    failures++;
+}
+else
+{
+    Console.WriteLine($"Kategorie {smallCategoryId}: totalCount={smallPage.TotalCount}, vráceno={smallPage.Items.Count}");
+    foreach (var show in smallPage.Items.Take(8))
+    {
+        Console.WriteLine($"  show:{show.Slug,-45} playable={show.Playable,-5} \"{show.Title}\"");
+    }
+
+    Console.WriteLine("  ...");
+}
+
+Console.WriteLine();
+Console.WriteLine("=== Katalog: stránkování přes offset na velké kategorii (bez duplicit/mezer) ===");
+
+const string bigCategoryId = "4003"; // Dokumenty, several thousand shows - real pagination required
+const int pageSize = 80;
+var page1 = await client.GetCategoryShowsAsync(bigCategoryId, pageSize, 0, TimeSpan.FromHours(3), default).ConfigureAwait(false);
+var page2 = await client.GetCategoryShowsAsync(bigCategoryId, pageSize, pageSize, TimeSpan.FromHours(3), default).ConfigureAwait(false);
+
+if (page1 is null || page2 is null)
+{
+    Console.WriteLine($"CHYBA: GetCategoryShowsAsync({bigCategoryId}) vrátilo null pro stránku 1 nebo 2.");
+    failures++;
+}
+else
+{
+    Console.WriteLine($"Kategorie {bigCategoryId} (\"Dokumenty\"): totalCount={page1.TotalCount}");
+    Console.WriteLine($"  Stránka 1 (offset=0,  limit={pageSize}): {page1.Items.Count} pořadů, první=\"{page1.Items.FirstOrDefault()?.Title}\", poslední=\"{page1.Items.LastOrDefault()?.Title}\"");
+    Console.WriteLine($"  Stránka 2 (offset={pageSize}, limit={pageSize}): {page2.Items.Count} pořadů, první=\"{page2.Items.FirstOrDefault()?.Title}\", poslední=\"{page2.Items.LastOrDefault()?.Title}\"");
+
+    var page1Ids = page1.Items.Select(s => s.ShowId).ToHashSet(StringComparer.Ordinal);
+    var overlap = page2.Items.Count(s => page1Ids.Contains(s.ShowId));
+    Console.WriteLine($"  Překryv mezi stránkami (mělo by být 0): {overlap}");
+
+    if (page1.TotalCount < 500)
+    {
+        Console.WriteLine($"  CHYBA: čekal jsem u \"Dokumenty\" řádově tisíce položek, totalCount={page1.TotalCount} je podezřele nízké.");
+        failures++;
+    }
+
+    if (overlap != 0)
+    {
+        Console.WriteLine("  CHYBA: stránky se překrývají, offset pagination nefunguje jak má.");
+        failures++;
+    }
+
+    if (page1.Items.Count == 0 || page2.Items.Count == 0)
+    {
+        Console.WriteLine("  CHYBA: některá ze stránek je prázdná.");
+        failures++;
+    }
+}
+
+Console.WriteLine();
+Console.WriteLine("=== Katalog: neexistující categoryId se má ztratit potichu (graceful), ne spadnout ===");
+
+var badPage = await client.GetCategoryShowsAsync("999999999", 10, 0, TimeSpan.FromHours(3), default).ConfigureAwait(false);
+Console.WriteLine($"GetCategoryShowsAsync(\"999999999\") => {(badPage is null ? "null (OK, očekáváno)" : "NEOČEKÁVANĚ vrátilo data")}");
+if (badPage is not null)
+{
+    Console.WriteLine("  CHYBA: neplatné categoryId by měl server odmítnout (NOT_FOUND) a klient to má vrátit jako null.");
+    failures++;
+}
+
+Console.WriteLine();
 Console.WriteLine("=== Shrnutí ===");
 Console.WriteLine(failures == 0 ? "VŠECHNY TESTY PROŠLY (0 chyb)." : $"NALEZENO {failures} CHYB.");
 
