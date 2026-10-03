@@ -581,8 +581,49 @@ public sealed class CtApiClient : IDisposable
             }
         }
 
-        var result = new CtCatalogPage(firstPage.TotalCount, allItems);
+        // Katalog ČT někdy vypíše stejný titul víckrát (starý + nový záznam, díly seriálu
+        // bez společné složky) — Jellyfin by pak zobrazil duplicitní položky. Sloučíme podle
+        // názvu (preferujeme složku/seriál před samostatným filmem) a počet uvádíme po sloučení.
+        var deduped = DedupeByTitle(allItems);
+        var result = new CtCatalogPage(deduped.Count, deduped);
         _categoryFullCache[cacheKey] = new CacheEntry<CtCatalogPage>(result, DateTime.UtcNow.Add(ttl));
+        return result;
+    }
+
+    /// <summary>
+    /// Removes duplicate titles from a full category listing, keeping the first occurrence
+    /// (or a series/folder entry over a standalone movie when both exist).
+    /// </summary>
+    private static List<CtCatalogShow> DedupeByTitle(List<CtCatalogShow> items)
+    {
+        var indexByTitle = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<CtCatalogShow>(items.Count);
+        foreach (var item in items)
+        {
+            var key = (item.Title ?? string.Empty).Trim();
+            if (key.Length == 0)
+            {
+                result.Add(item);
+                continue;
+            }
+
+            if (indexByTitle.TryGetValue(key, out var idx))
+            {
+                var kept = result[idx];
+                var keptIsMovie = string.Equals(kept.ShowType, "movie", StringComparison.OrdinalIgnoreCase);
+                var newIsMovie = string.Equals(item.ShowType, "movie", StringComparison.OrdinalIgnoreCase);
+                if (keptIsMovie && !newIsMovie)
+                {
+                    result[idx] = item; // složka/seriál je užitečnější než samostatný film
+                }
+
+                continue;
+            }
+
+            indexByTitle[key] = result.Count;
+            result.Add(item);
+        }
+
         return result;
     }
 

@@ -1,7 +1,7 @@
 ---
 name: "iVysílání"
 guid: "50151328-7f55-42fe-b7d2-a789212ef6fc"
-version: "1.2.0.0"
+version: "1.2.1.0"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Celý katalog ČT iVysílání (podle kategorií) + oblíbené pořady, streamované přímo z CDN ČT."
