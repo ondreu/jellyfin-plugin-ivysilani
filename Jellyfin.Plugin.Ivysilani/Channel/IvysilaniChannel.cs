@@ -184,11 +184,15 @@ public sealed class IvysilaniChannel : IChannel, IRequiresMediaInfoCallback
 
         var mediaSource = new MediaSourceInfo
         {
-            // Jellyfin's HLS playback pipeline Guid.Parse()s whatever mediaSourceId it's given
-            // once it can't find an exact string match among the returned sources; a bare ČT id
-            // (e.g. "224512120130001") isn't Guid-shaped and crashes that with a 500. Using a
-            // deterministic MD5-derived Guid keeps lookups stable while satisfying that parse.
-            Id = CtApiClient.ToMediaSourceGuid(id).ToString("N"),
+            // Id ZÁMĚRNĚ nevyplňujeme. Jellyfin 12.x (ChannelManager.NormalizeMediaSources) prázdné
+            // Id doplní na item.Id ve tvaru "N" — a přesně tenhle Id má i placeholder media source,
+            // který server vrací v GET /Items/{id}?fields=MediaSources. Android TV klient si bere
+            // MediaSourceId právě odtud a pošle ho zpátky do POST /Items/{id}/PlaybackInfo; když jsme
+            // kdysi posílali vlastní MD5-Guid, hledání zdroje podle toho Id selhalo →
+            // errorCode=NoCompatibleStream → PlaybackException, který jellyfin-androidtv v ne-LiveTV
+            // větvi jen Timber.e loguje → černá obrazovka bez hlášky (ověřeno 2026-10-04, TV vs mobil).
+            // Prázdné Id je navíc pořád Guid-kompatibilní (item.Id), takže cesta
+            // /videos/{id}/master.m3u8?MediaSourceId=… pořád projde Guid.Parse i přesnou shodou.
             Path = resolved.HlsUrl,
             Protocol = MediaProtocol.Http,
             Container = "hls",

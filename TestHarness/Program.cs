@@ -405,8 +405,11 @@ else
             }
         }
 
-        var mediaSourceId = CtApiClient.ToMediaSourceGuid(movie.Idec).ToString("N");
-        Console.WriteLine($"  MediaSourceInfo.Id, který by šel do GetChannelItemMediaInfo: {mediaSourceId} (Guid-parseable: {Guid.TryParse(mediaSourceId, out _)})");
+        // v1.3.1: MediaSourceInfo.Id se v GetChannelItemMediaInfo ZÁMĚRNĚ nevyplňuje.
+        // Prázdné Id nechá Jellyfin (ChannelManager.NormalizeMediaSources) doplnit na item.Id
+        // ve tvaru "N" -> sedí s placeholder zdrojem z GET /Items/{id}, který Android TV posílá
+        // zpět jako MediaSourceId. Vlastní MD5-Guid tam způsoboval NoCompatibleStream.
+        Console.WriteLine("  MediaSourceInfo.Id: ponecháno prázdné -> server doplní item.Id (Guid, tvar N); vlastní MD5-Guid by na Android TV způsobil NoCompatibleStream.");
     }
 }
 

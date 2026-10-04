@@ -69,9 +69,20 @@ vezme direct play.
 
 ## Na co si dát v Jellyfinu pozor
 
-**`MediaSourceInfo.Id` musí být GUID.** V1.1 plugin posílal desítkové ID a
-server na to spadl s `System.FormatException: Unrecognized Guid format` —
-klient pak hlásil chybu přehrávání. Používá se md5 z klíče položky.
+**`MediaSourceInfo.Id` se záměrně NEvyplňuje (od v1.3.1).** Dřív plugin
+posílal vlastní md5-Guid (předtím vůbec desítkové ID ČT, na které server
+spadal s `System.FormatException: Unrecognized Guid format`). Jenže server
+vrací media source na dvou místech a Id se musí shodovat: v
+`GET /Items/{id}?fields=MediaSources` je to placeholder s `Id = item.Id`,
+zatímco v `POST /Items/{id}/PlaybackInfo` se bere z `GetChannelItemMediaInfo`.
+Android TV klient si bere `MediaSourceId` z toho prvního místa a posílá ho
+zpátko do PlaybackInfo — vlastní md5 tam hledání zdroje nenašlo →
+`errorCode=NoCompatibleStream` → jellyfin-androidtv tenhle případ v ne-LiveTV
+větvi jen `Timber.e` loguje (bez hlášky i bez zavření přehrávače) → **černá
+obrazovka s časem nahoře a ničím dalším**. Prázdné Id nechá
+`ChannelManager.NormalizeMediaSources` doplnit na `item.Id` (tvar `N`), takže
+obě cesty sedí a je to pořád GUID-kompatibilní pro `Guid.Parse` v HLS cestě.
+Mobil `MediaSourceId` neposílá, proto mu to jelo — proto bug prošel.
 
 **Bez sezónních složek seriály nepřehraješ.** `Series.GetEpisodes()` v
 Jellyfinu prochází jen `OfType<Season>()` — epizody nalepené přímo pod
